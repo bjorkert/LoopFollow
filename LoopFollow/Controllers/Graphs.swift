@@ -599,13 +599,24 @@ extension MainViewController {
     }
     
     func updateBolusGraph() {
-        var dataIndex = 3
-        var yTop: Double = 370
-        var yBottom: Double = 345
-        BGChart.lineData?.dataSets[dataIndex].clear()
-        BGChartFull.lineData?.dataSets[dataIndex].clear()
+        let dataIndex = 3
+        var mainChart = BGChart.lineData!.dataSets[dataIndex] as! LineChartDataSet
+        var smallChart = BGChartFull.lineData!.dataSets[dataIndex] as! LineChartDataSet
+        mainChart.clear()
+        smallChart.clear()
+
+        let actionDuration: TimeInterval = 6 * 60 //6H
+        let peakActivityTime: TimeInterval = 55 //55 minutes for fiasp - to be configurable
+        let τ: Double = peakActivityTime * (1 - peakActivityTime / actionDuration) / (1 - 2 * peakActivityTime / actionDuration)
+        let a: Double = 2 * τ / actionDuration
+        let S: Double = 1 / (1 - a + (1 + a) * exp(-actionDuration / τ))
         
+        var colors = [NSUIColor]()
         for i in 0..<bolusData.count{
+            var dateTimeStamp = bolusData[i].date
+            let time: TimeInterval = (dateTimeUtils.getNowTimeIntervalUTC() - dateTimeStamp) / 60
+            let ia: Double = (S / pow(time, 2)) * time * (1 - time / actionDuration) * exp(-time / τ)
+
             let formatter = NumberFormatter()
             formatter.minimumFractionDigits = 0
             formatter.maximumFractionDigits = 2
@@ -613,7 +624,6 @@ extension MainViewController {
             
             // Check overlapping carbs to shift left if needed
             let bolusShift = findNextBolusTime(timeWithin: 240, needle: bolusData[i].date, haystack: bolusData, startingIndex: i)
-            var dateTimeStamp = bolusData[i].date
             if bolusShift {
                 // Move it half the distance between BG readings
                 dateTimeStamp = dateTimeStamp - 150
@@ -623,17 +633,41 @@ extension MainViewController {
             if dateTimeStamp < dateTimeUtils.getTimeInterval24HoursAgo() { continue }
   
             let dot = ChartDataEntry(x: Double(dateTimeStamp), y: Double(bolusData[i].sgv), data: formatter.string(from: NSNumber(value: bolusData[i].value)))
-            BGChart.data?.dataSets[dataIndex].addEntry(dot)
+            mainChart.addEntry(dot)
             if UserDefaultsRepository.smallGraphTreatments.value {
-                BGChartFull.data?.dataSets[dataIndex].addEntry(dot)
+                smallChart.addEntry(dot)
+            }
+            
+            if ia < 0.001 {
+                colors.append(NSUIColor.systemYellow)
+            } else if ia < 0.003{
+                colors.append(NSUIColor.systemRed)
+            } else if ia < 0.006{
+                colors.append(NSUIColor.systemPink)
+            } else {
+                colors.append(NSUIColor.systemBlue)
             }
 
         }
-        BGChart.data?.dataSets[dataIndex].notifyDataSetChanged()
+        
+        mainChart.colors.removeAll()
+        mainChart.circleColors.removeAll()
+        smallChart.colors.removeAll()
+        smallChart.circleColors.removeAll()
+
+        if colors.count > 0 {
+            for i in 0..<colors.count{
+                mainChart.addColor(colors[i])
+                mainChart.circleColors.append(colors[i])
+                smallChart.addColor(colors[i])
+                smallChart.circleColors.append(colors[i])
+            }
+        }
+        mainChart.notifyDataSetChanged()
         BGChart.data?.notifyDataChanged()
         BGChart.notifyDataSetChanged()
         if UserDefaultsRepository.smallGraphTreatments.value {
-            BGChartFull.data?.dataSets[dataIndex].notifyDataSetChanged()
+            smallChart.notifyDataSetChanged()
             BGChartFull.data?.notifyDataChanged()
             BGChartFull.notifyDataSetChanged()
         }
