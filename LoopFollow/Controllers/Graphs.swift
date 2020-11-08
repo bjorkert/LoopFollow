@@ -605,47 +605,52 @@ extension MainViewController {
         mainChart.clear()
         smallChart.clear()
 
-        let actionDuration: TimeInterval = 6 * 60 //6H
-        let peakActivityTime: TimeInterval = 55 //55 minutes for fiasp - to be configurable
+        /*
+         * Code from loop and openaps
+         * https://github.com/LoopKit/LoopKit/blob/891df924b2a849220a95e8c43ba51d0a08d14320/InsulinKit/ExponentialInsulinModel.swift#L11-L62
+         * https://github.com/openaps/oref0/blob/dev/lib/iob/calculate.js
+         */
+        let actionDuration: Double = 6 * 60 //6H
+        let peakActivityTime: Double = 55 //55 minutes for fiasp - to be configurable
         let τ: Double = peakActivityTime * (1 - peakActivityTime / actionDuration) / (1 - 2 * peakActivityTime / actionDuration)
         let a: Double = 2 * τ / actionDuration
         let S: Double = 1 / (1 - a + (1 + a) * exp(-actionDuration / τ))
         
         var colors = [NSUIColor]()
+
+        let formatter = NumberFormatter()
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.minimumIntegerDigits = 0
+
         for i in 0..<bolusData.count{
             var dateTimeStamp = bolusData[i].date
-            let time: TimeInterval = (dateTimeUtils.getNowTimeIntervalUTC() - dateTimeStamp) / 60
-            let ia: Double = (S / pow(time, 2)) * time * (1 - time / actionDuration) * exp(-time / τ)
 
-            let formatter = NumberFormatter()
-            formatter.minimumFractionDigits = 0
-            formatter.maximumFractionDigits = 2
-            formatter.minimumIntegerDigits = 0
-            
+            // skip if > 24 hours old
+            if dateTimeStamp < dateTimeUtils.getTimeInterval24HoursAgo() { continue }
+
+            let time: Double = (dateTimeUtils.getNowTimeIntervalUTC() - dateTimeStamp) / 60
+            let ia: Double = (S / pow(τ, 2)) * time * (1 - time / actionDuration) * exp(-time / τ)
+
             // Check overlapping carbs to shift left if needed
             let bolusShift = findNextBolusTime(timeWithin: 240, needle: bolusData[i].date, haystack: bolusData, startingIndex: i)
             if bolusShift {
                 // Move it half the distance between BG readings
                 dateTimeStamp = dateTimeStamp - 150
             }
-            
-            // skip if > 24 hours old
-            if dateTimeStamp < dateTimeUtils.getTimeInterval24HoursAgo() { continue }
-  
+              
             let dot = ChartDataEntry(x: Double(dateTimeStamp), y: Double(bolusData[i].sgv), data: formatter.string(from: NSNumber(value: bolusData[i].value)))
             mainChart.addEntry(dot)
             if UserDefaultsRepository.smallGraphTreatments.value {
                 smallChart.addEntry(dot)
             }
             
-            if ia < 0.001 {
-                colors.append(NSUIColor.systemYellow)
-            } else if ia < 0.003{
-                colors.append(NSUIColor.systemRed)
-            } else if ia < 0.006{
-                colors.append(NSUIColor.systemPink)
-            } else {
+            if ia < 0.004 {
+                colors.append(NSUIColor.systemIndigo)
+            } else if ia < 0.007{
                 colors.append(NSUIColor.systemBlue)
+            } else {
+                colors.append(NSUIColor.systemTeal)
             }
 
         }
