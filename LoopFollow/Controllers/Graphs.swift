@@ -616,6 +616,8 @@ extension MainViewController {
         let a: Double = 2 * τ / actionDuration
         let S: Double = 1 / (1 - a + (1 + a) * exp(-actionDuration / τ))
         
+        let iaPeak: Double = (S / pow(τ, 2)) * peakActivityTime * (1 - peakActivityTime / actionDuration) * exp(-peakActivityTime / τ)
+
         var colors = [NSUIColor]()
 
         let formatter = NumberFormatter()
@@ -626,12 +628,16 @@ extension MainViewController {
         for i in 0..<bolusData.count{
             var dateTimeStamp = bolusData[i].date
 
+            //To generate test data - remove before release
+            //dateTimeStamp = dateTimeUtils.getNowTimeIntervalUTC() - Double(5 * 60 *  (bolusData.count - i))
+            
             // skip if > 24 hours old
             if dateTimeStamp < dateTimeUtils.getTimeInterval24HoursAgo() { continue }
 
             let time: Double = (dateTimeUtils.getNowTimeIntervalUTC() - dateTimeStamp) / 60
             let ia: Double = (S / pow(τ, 2)) * time * (1 - time / actionDuration) * exp(-time / τ)
-
+            let iaPercent = 100 * ia / iaPeak
+            
             // Check overlapping carbs to shift left if needed
             let bolusShift = findNextBolusTime(timeWithin: 240, needle: bolusData[i].date, haystack: bolusData, startingIndex: i)
             if bolusShift {
@@ -644,22 +650,18 @@ extension MainViewController {
             if UserDefaultsRepository.smallGraphTreatments.value {
                 smallChart.addEntry(dot)
             }
-            
-            if ia < 0.004 {
-                colors.append(NSUIColor.systemIndigo)
-            } else if ia < 0.007{
-                colors.append(NSUIColor.systemBlue)
-            } else {
-                colors.append(NSUIColor.systemTeal)
-            }
 
+            if iaPercent < 90 {
+                colors.append(NSUIColor.systemBlue.withAlphaComponent(CGFloat(0.1 + iaPercent/100)))
+            } else {
+                colors.append(NSUIColor.systemTeal.withAlphaComponent(CGFloat(iaPercent/100)))
+            }
         }
         
         mainChart.colors.removeAll()
         mainChart.circleColors.removeAll()
         smallChart.colors.removeAll()
         smallChart.circleColors.removeAll()
-
         if colors.count > 0 {
             for i in 0..<colors.count{
                 mainChart.addColor(colors[i])
