@@ -651,8 +651,8 @@ extension MainViewController {
                 smallChart.addEntry(dot)
             }
 
-            if iaPercent < 90 {
-                colors.append(NSUIColor.systemBlue.withAlphaComponent(CGFloat(0.1 + iaPercent/100)))
+            if iaPercent < 80 {
+                colors.append(NSUIColor.systemBlue.withAlphaComponent(CGFloat(0.2 + iaPercent/100)))
             } else {
                 colors.append(NSUIColor.systemTeal.withAlphaComponent(CGFloat(iaPercent/100)))
             }
