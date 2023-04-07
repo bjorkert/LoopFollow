@@ -3,12 +3,14 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 51;
+	objectVersion = 52;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		3F1335F351590E573D8E6962 /* Pods_LoopFollow.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A7D55B42A22051DAD69E89D0 /* Pods_LoopFollow.framework */; };
 		DD152D3B24C01B2300361FA2 /* InfoDisplaySettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD152D3A24C01B2300361FA2 /* InfoDisplaySettingsViewController.swift */; };
+		DD4CF41729E0113C00309531 /* SocketIO in Frameworks */ = {isa = PBXBuildFile; productRef = DD4CF41629E0113C00309531 /* SocketIO */; };
+		DD4CF41929E0117C00309531 /* SocketIOManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD4CF41829E0117C00309531 /* SocketIOManager.swift */; };
 		DD98F54424BCEFEE0007425A /* ShareClientExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD98F54324BCEFEE0007425A /* ShareClientExtension.swift */; };
 		DDCF979424C0D380002C9752 /* UIViewExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCF979324C0D380002C9752 /* UIViewExtension.swift */; };
 		DDCF979624C1443C002C9752 /* GeneralSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDCF979524C1443C002C9752 /* GeneralSettingsViewController.swift */; };
@@ -175,6 +177,7 @@
 		059B0FA59AABFE72FE13DDDA /* Pods-LoopFollow.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-LoopFollow.release.xcconfig"; path = "Target Support Files/Pods-LoopFollow/Pods-LoopFollow.release.xcconfig"; sourceTree = "<group>"; };
 		A7D55B42A22051DAD69E89D0 /* Pods_LoopFollow.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_LoopFollow.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD152D3A24C01B2300361FA2 /* InfoDisplaySettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InfoDisplaySettingsViewController.swift; sourceTree = "<group>"; };
+		DD4CF41829E0117C00309531 /* SocketIOManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SocketIOManager.swift; sourceTree = "<group>"; };
 		DD98F54324BCEFEE0007425A /* ShareClientExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareClientExtension.swift; sourceTree = "<group>"; };
 		DDCF979324C0D380002C9752 /* UIViewExtension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIViewExtension.swift; sourceTree = "<group>"; };
 		DDCF979524C1443C002C9752 /* GeneralSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeneralSettingsViewController.swift; sourceTree = "<group>"; };
@@ -349,6 +352,7 @@
 			files = (
 				FCFEEC9E2486E68E00402A7F /* WebKit.framework in Frameworks */,
 				3F1335F351590E573D8E6962 /* Pods_LoopFollow.framework in Frameworks */,
+				DD4CF41729E0113C00309531 /* SocketIO in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -406,6 +410,7 @@
 				FC1BDD2A24A22650001B652C /* Stats.swift */,
 				FC1BDD2C24A23204001B652C /* StatsView.swift */,
 				FCA2DDE52501095000254A8C /* Timers.swift */,
+				DD4CF41829E0117C00309531 /* SocketIOManager.swift */,
 			);
 			path = Controllers;
 			sourceTree = "<group>";
@@ -643,6 +648,9 @@
 			dependencies = (
 			);
 			name = LoopFollow;
+			packageProductDependencies = (
+				DD4CF41629E0113C00309531 /* SocketIO */,
+			);
 			productName = LoopFollow;
 			productReference = FC9788142485969B00A7906C /* Loop Follow.app */;
 			productType = "com.apple.product-type.application";
@@ -671,6 +679,9 @@
 				Base,
 			);
 			mainGroup = FC97880B2485969B00A7906C;
+			packageReferences = (
+				DD4CF41529E0113C00309531 /* XCRemoteSwiftPackageReference "socket" */,
+			);
 			productRefGroup = FC9788152485969B00A7906C /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -869,6 +880,7 @@
 				FCC6886924898FB100A0279D /* UserDefaultsValueGroups.swift in Sources */,
 				FC16A97D24996747003D6245 /* Alarms.swift in Sources */,
 				FC16A97B249966A3003D6245 /* AlarmSound.swift in Sources */,
+				DD4CF41929E0117C00309531 /* SocketIOManager.swift in Sources */,
 				FCFEECA2248857A600402A7F /* SettingsViewController.swift in Sources */,
 				FCFEECA02488157B00402A7F /* Chart.swift in Sources */,
 				DDCF979424C0D380002C9752 /* UIViewExtension.swift in Sources */,
@@ -1104,6 +1116,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		DD4CF41529E0113C00309531 /* XCRemoteSwiftPackageReference "socket" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/socketio/socket.io-client-swift";
+			requirement = {
+				kind = exactVersion;
+				version = 16.0.1;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		DD4CF41629E0113C00309531 /* SocketIO */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = DD4CF41529E0113C00309531 /* XCRemoteSwiftPackageReference "socket" */;
+			productName = SocketIO;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCVersionGroup section */
 		FC3AE7B3249E8E0E00AAE1E0 /* LoopFollow.xcdatamodeld */ = {

@@ -10,13 +10,15 @@ import UIKit
 import CoreData
 import UserNotifications
 import EventKit
+import SocketIO
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
     let notificationCenter = UNUserNotificationCenter.current()
-   
+    var socketIOManager: SocketIOManager?
+    
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Override point for customization after application launch.
         
@@ -34,6 +36,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         }
         
         UNUserNotificationCenter.current().delegate = self
+
+        let url = URL(string: UserDefaultsRepository.url.value)!
+        let apiSecret = ""
+        socketIOManager = SocketIOManager(url: url, apiSecret: apiSecret)
         
          return true
       }
