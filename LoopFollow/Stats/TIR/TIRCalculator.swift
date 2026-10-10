@@ -91,11 +91,11 @@ class TIRCalculator {
         return tirPoints
     }
 
-    private static func calculatePercentages(readings: [Double],
-                                             veryLowThreshold: Double,
-                                             lowThreshold: Double,
-                                             highThreshold: Double,
-                                             veryHighThreshold: Double) -> (veryLow: Double, low: Double, inRange: Double, high: Double, veryHigh: Double)
+    static func calculatePercentages(readings: [Double],
+                                     veryLowThreshold: Double,
+                                     lowThreshold: Double,
+                                     highThreshold: Double,
+                                     veryHighThreshold: Double) -> (veryLow: Double, low: Double, inRange: Double, high: Double, veryHigh: Double)
     {
         let total = Double(readings.count)
         guard total > 0 else {

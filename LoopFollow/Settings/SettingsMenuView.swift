@@ -158,6 +158,7 @@ enum SettingsRoute: Hashable, Identifiable {
                 SettingsLeaf("Persistent Notification"),
                 SettingsLeaf("Appearance", ["dark mode", "light mode", "theme"]),
                 SettingsLeaf("Display Stats"),
+                SettingsLeaf("Stats Style", ["time in range band", "statistics box", "tir band", "progress bar"]),
                 SettingsLeaf("Display Small Graph"),
                 SettingsLeaf("Color BG Text"),
                 SettingsLeaf("Keep Screen Active", ["screen lock", "screenlock"]),
