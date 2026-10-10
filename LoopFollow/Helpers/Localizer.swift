@@ -77,6 +77,19 @@ final class UnitSettingsStore {
         }
     }
 
+    var timeInRangeTitle: String {
+        switch timeInRangeMode {
+        case .tir:
+            return "Time in Range"
+        case .titr:
+            return "Time in Tight Range"
+        case .ting:
+            return "Time in Normoglycemia"
+        case .custom:
+            return "Custom Range"
+        }
+    }
+
     var glycemicMetricMode: GlycemicMetricMode {
         get {
             Storage.shared.showGMI.value ? .gmi : .ehba1c
