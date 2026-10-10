@@ -77,6 +77,7 @@ extension MainViewController {
         switch UnitSettingsStore.shared.timeInRangeMode {
         case .tir: statsDisplayModel.bandTitle = "Time in Range"
         case .titr: statsDisplayModel.bandTitle = "Time in Tight Range"
+        case .ting: statsDisplayModel.bandTitle = "Time in Normoglycemia"
         case .custom: statsDisplayModel.bandTitle = "Time in Range"
         }
 
