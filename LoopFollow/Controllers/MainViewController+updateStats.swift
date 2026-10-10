@@ -48,39 +48,5 @@ extension MainViewController {
             statsDisplayModel.pieRange = Double(stats.percentRange)
             statsDisplayModel.pieHigh = Double(stats.percentHigh)
         }
-        updateTIRBand()
-    }
-
-    /// Today's (since midnight) range distribution for the Time in Range band.
-    /// Very low is below 54 mg/dL and very high above 250 mg/dL; low, in range
-    /// and high follow the Range Mode chosen in Settings (TIR, TITR or Custom).
-    func updateTIRBand() {
-        let thresholds = UnitSettingsStore.shared.effectiveThresholds()
-        let startOfDay = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970
-        let values = bgData
-            .filter { $0.date >= startOfDay && $0.sgv > 0 }
-            .map { Double($0.sgv) }
-
-        switch UnitSettingsStore.shared.timeInRangeMode {
-        case .tir: statsDisplayModel.bandTitle = "Time in Range"
-        case .titr: statsDisplayModel.bandTitle = "Time in Tight Range"
-        case .ting: statsDisplayModel.bandTitle = "Time in Normoglycemia"
-        case .custom: statsDisplayModel.bandTitle = "Time in Range"
-        }
-
-        let percentages = TIRCalculator.calculatePercentages(
-            readings: values,
-            veryLowThreshold: 54.0,
-            lowThreshold: thresholds.low,
-            highThreshold: thresholds.high,
-            veryHighThreshold: 250.0
-        )
-
-        statsDisplayModel.bandVeryLowPct = percentages.veryLow
-        statsDisplayModel.bandLowPct = percentages.low
-        statsDisplayModel.bandInRangePct = percentages.inRange
-        statsDisplayModel.bandHighPct = percentages.high
-        statsDisplayModel.bandVeryHighPct = percentages.veryHigh
-        statsDisplayModel.bandHasData = !values.isEmpty
     }
 }

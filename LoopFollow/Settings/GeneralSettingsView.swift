@@ -8,7 +8,6 @@ struct GeneralSettingsView: View {
     @ObservedObject var appBadge = Storage.shared.appBadge
     @ObservedObject var appearanceMode = Storage.shared.appearanceMode
     @ObservedObject var showStats = Storage.shared.showStats
-    @ObservedObject var showTIRBand = Storage.shared.showTIRBand
     @ObservedObject var showSmallGraph = Storage.shared.showSmallGraph
     @ObservedObject var screenlockSwitchState = Storage.shared.screenlockSwitchState
     @ObservedObject var showDisplayName = Storage.shared.showDisplayName
@@ -46,12 +45,6 @@ struct GeneralSettingsView: View {
                     }
                 }
                 Toggle("Display Stats", isOn: $showStats.value)
-                if showStats.value {
-                    Picker("Stats Style", selection: $showTIRBand.value) {
-                        Text("Statistics Box").tag(false)
-                        Text("Time in Range Band").tag(true)
-                    }
-                }
                 Toggle("Display Small Graph", isOn: $showSmallGraph.value)
                 Toggle("Color BG Text", isOn: $colorBGText.value)
                 Toggle("Keep Screen Active", isOn: $screenlockSwitchState.value)

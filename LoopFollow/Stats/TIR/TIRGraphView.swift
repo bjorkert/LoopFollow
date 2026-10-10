@@ -7,7 +7,7 @@ import SwiftUI
 struct TIRGraphView: View {
     let tirData: [TIRDataPoint]
 
-    enum Band: String, CaseIterable, Plottable {
+    private enum Band: String, CaseIterable, Plottable {
         case veryLow = "Very Low"
         case low = "Low"
         case inRange = "In Range"

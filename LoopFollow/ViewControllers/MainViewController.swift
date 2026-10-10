@@ -290,7 +290,6 @@ class MainViewController: UIViewController, UNUserNotificationCenterDelegate {
             .sink { [weak self] _ in
                 self?.updateBGGraphSettings()
                 self?.updateBGGraph()
-                self?.updateStats()
                 LiveActivityManager.shared.refreshFromCurrentState(reason: "range mode changed")
             }
             .store(in: &cancellables)

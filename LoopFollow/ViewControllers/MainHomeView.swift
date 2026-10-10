@@ -13,7 +13,6 @@ struct MainHomeView: View {
 
     @ObservedObject var showSmallGraph = Storage.shared.showSmallGraph
     @ObservedObject var showStats = Storage.shared.showStats
-    @ObservedObject var showTIRBand = Storage.shared.showTIRBand
     @ObservedObject var hideInfoTable = Storage.shared.hideInfoTable
     @ObservedObject var smallGraphHeight = Storage.shared.smallGraphHeight
     @ObservedObject var url = Storage.shared.url
@@ -59,11 +58,7 @@ struct MainHomeView: View {
 
             // Statistics
             if showStats.value {
-                if showTIRBand.value {
-                    TIRBandView(model: statsModel, onTap: onStatsTap)
-                } else {
-                    StatsDisplayView(model: statsModel, onTap: onStatsTap)
-                }
+                StatsDisplayView(model: statsModel, onTap: onStatsTap)
             }
         }
         .padding(8)
