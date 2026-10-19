@@ -49,6 +49,8 @@ enum WatchStateBuilder {
 
         return WatchState(
             builtAt: now,
+            source: .phone,
+            phoneBuiltAt: now,
             snapshot: GlucoseSnapshotBuilder.build(from: StorageCurrentGlucoseStateProvider()),
             readings: readings,
             predictions: predictions,
@@ -58,10 +60,51 @@ enum WatchStateBuilder {
             lowMgdl: thresholds.low,
             highMgdl: thresholds.high,
             colorBGText: Storage.shared.colorBGText.value,
+            infoRows: infoRows(vc),
+            stats: vc.map { stats($0.statsDisplayModel) },
             lastLoopAt: lastLoop,
             device: Storage.shared.device.value,
             alarm: currentAlarm(),
             remote: remoteConfig()
+        )
+    }
+
+    /// Same rows, order and coloring as the phone's info table (InfoTableView).
+    private static func infoRows(_ vc: MainViewController?) -> [WatchInfoRow] {
+        var rows: [WatchInfoRow] = []
+        if Storage.shared.graphTimeZoneEnabled.value,
+           let tz = TimeZone(identifier: Storage.shared.graphTimeZoneIdentifier.value)
+        {
+            rows.append(WatchInfoRow(name: "Time Zone", value: tz.identifier, level: nil))
+        }
+        guard let infoManager = vc?.infoManager else { return rows }
+        let items = Storage.shared.infoDisplayItems.value
+        for row in infoManager.visibleRows {
+            var level: InfoColorLevel?
+            if let numeric = row.numericValue,
+               let type = InfoType(rawValue: row.id),
+               let config = type.colorConfig
+            {
+                level = items.item(for: type)?.coloring.level(for: numeric, direction: config.direction)
+            }
+            rows.append(WatchInfoRow(name: row.name, value: row.value.isEmpty ? "—" : row.value, level: level))
+        }
+        return rows
+    }
+
+    private static func stats(_ model: StatsDisplayModel) -> WatchStats {
+        WatchStats(
+            lowPercent: model.lowPercent,
+            inRangePercent: model.inRangePercent,
+            highPercent: model.highPercent,
+            avgBG: model.avgBG,
+            estA1CTitle: model.estA1CTitle,
+            estA1C: model.estA1C,
+            stdDevTitle: model.stdDevTitle,
+            stdDev: model.stdDev,
+            pieLow: model.pieLow,
+            pieRange: model.pieRange,
+            pieHigh: model.pieHigh
         )
     }
 
@@ -140,7 +183,12 @@ enum WatchStateBuilder {
             }
             parts.append(durationText(seconds: TimeInterval(override.duration ?? 0)))
             let symbol = override.symbol.isEmpty ? "" : "\(override.symbol) "
-            return WatchPreset(id: override.name, name: symbol + override.name, detail: parts.joined(separator: ", "))
+            return WatchPreset(
+                id: override.name,
+                name: symbol + override.name,
+                detail: parts.joined(separator: ", "),
+                durationSeconds: TimeInterval(override.duration ?? 0)
+            )
         }
     }
 
@@ -154,7 +202,12 @@ enum WatchStateBuilder {
                 parts.append(Localizer.formatQuantity(target))
             }
             parts.append(durationText(seconds: (override.duration ?? 0) * 60))
-            return WatchPreset(id: override.name, name: override.name, detail: parts.joined(separator: ", "))
+            return WatchPreset(
+                id: override.name,
+                name: override.name,
+                detail: parts.joined(separator: ", "),
+                durationSeconds: (override.duration ?? 0) * 60
+            )
         }
     }
 
@@ -162,7 +215,13 @@ enum WatchStateBuilder {
         TempTargetPresetManager.shared.presets.map { preset in
             let target = Localizer.formatQuantity(preset.target)
             let duration = durationText(seconds: preset.duration.doubleValue(for: .second()))
-            return WatchPreset(id: preset.id.uuidString, name: preset.name, detail: "\(target), \(duration)")
+            return WatchPreset(
+                id: preset.id.uuidString,
+                name: preset.name,
+                detail: "\(target), \(duration)",
+                durationSeconds: preset.duration.doubleValue(for: .second()),
+                targetMgdl: preset.target.doubleValue(for: .milligramsPerDeciliter)
+            )
         }
     }
 

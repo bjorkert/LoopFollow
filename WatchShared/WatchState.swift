@@ -9,8 +9,11 @@ import Foundation
 struct WatchState: Codable, Equatable {
     static let contextKey = "watchState"
 
-    /// When the phone built this state.
+    /// When this state was built, by the phone or by the watch itself.
     var builtAt: Date
+    var source: WatchDataSource
+    /// When the phone last built a state; info rows, presets and guardrails date from then.
+    var phoneBuiltAt: Date
     /// Latest glucose state, shared with the Live Activity.
     var snapshot: GlucoseSnapshot?
     /// BG readings for the last 24 hours, oldest first.
@@ -26,6 +29,10 @@ struct WatchState: Codable, Equatable {
     var highMgdl: Double
     /// Mirrors the phone's "Color BG Text" setting.
     var colorBGText: Bool
+    /// The phone's visible info table rows, in its order and with its coloring.
+    var infoRows: [WatchInfoRow]
+    /// The statistics shown under the phone's chart.
+    var stats: WatchStats?
     /// When the loop last reported, nil when unknown.
     var lastLoopAt: Date?
     /// "Loop", "Trio" or another uploader name; empty for CGM-only setups.
@@ -44,6 +51,13 @@ struct WatchState: Codable, Equatable {
     }
 }
 
+enum WatchDataSource: String, Codable {
+    /// Built and sent by the phone.
+    case phone
+    /// Fetched by the watch from Nightscout or Dexcom while the phone was out of reach.
+    case watch
+}
+
 struct WatchReading: Codable, Equatable {
     /// Unix epoch seconds.
     let t: TimeInterval
@@ -51,6 +65,35 @@ struct WatchReading: Codable, Equatable {
     let v: Double
 
     var date: Date { Date(timeIntervalSince1970: t) }
+}
+
+/// The phone's statistics panel, formatted on the phone.
+struct WatchStats: Codable, Equatable {
+    var lowPercent: String
+    var inRangePercent: String
+    var highPercent: String
+    var avgBG: String
+    var estA1CTitle: String
+    var estA1C: String
+    var stdDevTitle: String
+    var stdDev: String
+    var pieLow: Double
+    var pieRange: Double
+    var pieHigh: Double
+}
+
+struct WatchInfoRow: Codable, Equatable {
+    let name: String
+    let value: String
+    /// Threshold coloring from the phone's Info Display settings; nil uses the default text color.
+    let level: InfoColorLevel?
+}
+
+/// Threshold band of an info table value, shared by the phone and the watch.
+enum InfoColorLevel: String, Codable {
+    case normal
+    case warning
+    case urgent
 }
 
 struct WatchPredictionLine: Codable, Equatable {
@@ -85,6 +128,10 @@ struct WatchPreset: Codable, Equatable, Identifiable {
     let name: String
     /// Preformatted on the phone in the user's units, e.g. "120 %, 1 h".
     let detail: String
+    /// Raw values the watch needs to send the preset without the phone: the
+    /// duration (0 = indefinite) and, for temp targets, the target in mg/dL.
+    var durationSeconds: Double = 0
+    var targetMgdl: Double?
 }
 
 struct WatchRemoteConfig: Codable, Equatable {
@@ -104,8 +151,8 @@ struct WatchRemoteConfig: Codable, Equatable {
     /// Trio only: a meal may carry fat and protein.
     let mealWithFatProtein: Bool
     /// The AID's own recommendation, as shown in the phone's bolus screen.
-    let recommendedBolus: Double?
-    let recommendedBolusAt: Date?
+    var recommendedBolus: Double?
+    var recommendedBolusAt: Date?
     let overridePresets: [WatchPreset]
     /// Trio only.
     let tempTargetPresets: [WatchPreset]

@@ -11,6 +11,8 @@ struct WatchProtocolTests {
     private func state(alarm: WatchAlarm? = nil) -> WatchState {
         WatchState(
             builtAt: t0,
+            source: .phone,
+            phoneBuiltAt: t0,
             snapshot: GlucoseSnapshot(glucose: 142, delta: -3, trend: .downSlight, updatedAt: t0, iob: 1.2, cob: 15, projected: 120, unit: .mmol, isNotLooping: false),
             readings: [WatchReading(t: t0.timeIntervalSince1970 - 300, v: 145), WatchReading(t: t0.timeIntervalSince1970, v: 142)],
             predictions: [WatchPredictionLine(kind: .iob, points: [WatchReading(t: t0.timeIntervalSince1970 + 300, v: 138)])],
@@ -20,6 +22,8 @@ struct WatchProtocolTests {
             lowMgdl: 70,
             highMgdl: 180,
             colorBGText: true,
+            infoRows: [WatchInfoRow(name: "IOB", value: "1,2", level: nil), WatchInfoRow(name: "SAGE", value: "9d 2h", level: .warning)],
+            stats: WatchStats(lowPercent: "2%", inRangePercent: "80%", highPercent: "18%", avgBG: "8,1", estA1CTitle: "GMI:", estA1C: "6,6", stdDevTitle: "Std Dev:", stdDev: "2,3", pieLow: 2, pieRange: 80, pieHigh: 18),
             lastLoopAt: t0,
             device: "Trio",
             alarm: alarm,
