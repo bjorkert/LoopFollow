@@ -70,11 +70,5 @@ class DataStructs {
 
         /// The Treatments list entry this band opens.
         var detail: Treatment? = nil
-
-        /// Scheduled end; nil for an indefinite target, which Trio stores
-        /// with a duration of about 30 days.
-        var scheduledEndDate: TimeInterval? {
-            duration >= 7 * 24 * 3600 ? nil : endDate
-        }
     }
 }
