@@ -700,8 +700,8 @@ class MainViewController: UIViewController, UNUserNotificationCenterDelegate {
     }
 
     @objc func handleRemoteMealCommandDidComplete(_ notification: Notification) {
-        if (notification.userInfo?["key"] as? String)?.hasPrefix(LoopProfileAckAdapter.keyPrefix) == true {
-            // Loop uploads the switched profile right after it confirms the command.
+        if let key = notification.userInfo?["key"] as? String, ProfileRemote.isProfileCommandKey(key) {
+            // Loop and Trio upload their profiles right after they confirm a profile command.
             TaskScheduler.shared.rescheduleTask(id: .profile, to: Date().addingTimeInterval(10))
         } else {
             TaskScheduler.shared.rescheduleTask(id: .treatments, to: Date())

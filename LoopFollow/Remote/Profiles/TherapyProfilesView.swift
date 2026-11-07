@@ -1,0 +1,367 @@
+// LoopFollow
+// TherapyProfilesView.swift
+
+import SwiftUI
+
+/// Lists the profiles of Loop or Trio. Selecting one shows its values, where it can be activated, edited,
+/// renamed or deleted, as far as the app supports those commands.
+struct TherapyProfilesView: View {
+    let remote: ProfileRemote
+
+    @ObservedObject private var therapyProfiles = Observable.shared.therapyProfiles
+    @ObservedObject private var remoteCommands = Storage.shared.remoteCommands
+    @ObservedObject private var loopRemoteCommands = Storage.shared.loopRemoteCommands
+    @State private var newProfileSource: TherapyProfile?
+
+    private var commands: [String] {
+        remote.acceptedCommands(profileDocument: remoteCommands.value, loopDeviceStatus: loopRemoteCommands.value)
+    }
+
+    private var canSave: Bool { remote.supports(.save, in: commands) }
+
+    /// Default is a real profile once the app can save profiles. Older Loop builds upload a Default entry that
+    /// only mirrors the active settings, so it is left out for them.
+    private func visibleProfiles(_ set: TherapyProfileSet) -> [TherapyProfile] {
+        canSave ? set.profiles : set.profiles.filter { !$0.isDefault }
+    }
+
+    var body: some View {
+        List {
+            Section {
+                ProfileCareTeamNote()
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+
+            if let profileSet = therapyProfiles.value, !visibleProfiles(profileSet).isEmpty {
+                Section(
+                    header: Text("Profiles"),
+                    footer: uploadedFooter(profileSet.uploadedAt)
+                ) {
+                    ForEach(visibleProfiles(profileSet)) { profile in
+                        NavigationLink(destination: TherapyProfilePreviewView(remote: remote, name: profile.name)) {
+                            HStack {
+                                Text(profile.name)
+                                Spacer()
+                                if profileSet.isActive(profile) {
+                                    Text("Active")
+                                        .font(.caption)
+                                        .foregroundColor(.green)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ScheduledSwitchesSection(remote: remote, profileSet: profileSet, commands: commands)
+
+                if canSave {
+                    let createBlocker = ProfileEditing.blocker(limits: profileSet.limits, remote: remote) ?? ProfileValidation.countProblem(profileCount: profileSet.profiles.count)
+                    Section(footer: Text(createBlocker ?? "A new profile starts as a copy of the active profile. Dosing does not change until it is activated.")) {
+                        Button {
+                            newProfileSource = profileSet.activeProfile ?? profileSet.profiles.first
+                        } label: {
+                            Label("New Profile", systemImage: "plus")
+                        }
+                        .disabled(createBlocker != nil || profileSet.profiles.isEmpty)
+                    }
+                }
+            } else {
+                Text(remote == .loop
+                    ? "No saved profiles found. Profiles are saved in Loop under Settings → Profiles."
+                    : "No profiles found. Profiles are saved in Trio under Settings → Therapy → Profiles.")
+                    .foregroundColor(.secondary)
+                    .italic()
+            }
+        }
+        .navigationBarTitle("Remote Profiles", displayMode: .inline)
+        .sheet(item: $newProfileSource) { source in
+            if let profileSet = therapyProfiles.value {
+                ProfileEditorSheet(remote: remote, mode: .new(source: source), profileSet: profileSet) {
+                    newProfileSource = nil
+                }
+            }
+        }
+    }
+
+    private func uploadedFooter(_ date: Date?) -> Text {
+        guard let date else { return Text("") }
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return Text("Uploaded by \(remote.appName) \(formatter.string(from: date)).")
+    }
+}
+
+/// Shows a profile's values. From here it can be activated, edited, renamed or deleted.
+struct TherapyProfilePreviewView: View {
+    let remote: ProfileRemote
+    let name: String
+
+    @Environment(\.presentationMode) private var presentationMode
+    @ObservedObject private var therapyProfiles = Observable.shared.therapyProfiles
+    @ObservedObject private var remoteCommands = Storage.shared.remoteCommands
+    @ObservedObject private var loopRemoteCommands = Storage.shared.loopRemoteCommands
+    @ObservedObject private var tracker = RemoteCommandTracker.shared
+    @State private var alertType: AlertType?
+    @State private var editing = false
+    @State private var renaming = false
+
+    private enum AlertType: Identifiable {
+        case confirmActivate
+        case confirmDelete
+        case result(kind: ProfileCommandKind, success: Bool, message: String)
+
+        var id: String {
+            switch self {
+            case .confirmActivate: return "activate"
+            case .confirmDelete: return "delete"
+            case let .result(kind, success, message): return "result-\(kind)-\(success)-\(message)"
+            }
+        }
+    }
+
+    private var commands: [String] {
+        remote.acceptedCommands(profileDocument: remoteCommands.value, loopDeviceStatus: loopRemoteCommands.value)
+    }
+
+    private var profileSet: TherapyProfileSet? { therapyProfiles.value }
+
+    private var profile: TherapyProfile? { profileSet?.profile(named: name) }
+
+    private var isActive: Bool {
+        guard let profile, let profileSet else { return false }
+        return profileSet.isActive(profile)
+    }
+
+    private var activateKey: String { remote.key(.activate, name: name) }
+    private var deleteKey: String { remote.key(.delete, name: name) }
+
+    private var resultKeys: [String] {
+        [activateKey, deleteKey]
+    }
+
+    private var anyPending: Bool { ProfileCommandFlow.isAnyPending(tracker, remote: remote) }
+
+    private var editBlocker: String? {
+        guard let profile else { return nil }
+        return ProfileEditing.blocker(for: profile, limits: profileSet?.limits, remote: remote)
+    }
+
+    var body: some View {
+        Group {
+            if let profile {
+                content(profile)
+            } else {
+                Text("This profile is no longer in the list uploaded by \(remote.appName).")
+                    .foregroundColor(.secondary)
+                    .padding()
+            }
+        }
+        .navigationBarTitle(name, displayMode: .inline)
+        .onProfileCommandResult(keys: resultKeys) { key, success, message in
+            let kind: ProfileCommandKind = key == activateKey ? .activate : .delete
+            alertType = .result(kind: kind, success: success, message: message)
+        }
+        .alert(item: $alertType) { type in alert(type) }
+    }
+
+    private func content(_ profile: TherapyProfile) -> some View {
+        List {
+            Section(footer: Text("\(remote.appName) writes the basal rates to the pump when the profile is activated.")) {
+                Text(isActive ? "This is the active profile. \(remote.appName) doses insulin with these values." : "Review the profile before activating it in \(remote.appName).")
+            }
+
+            ForEach(ProfileScheduleKind.allCases) { kind in
+                ProfileValuesEditor(
+                    kind: kind,
+                    segments: .constant(ProfileDraft(profile.values, singleTarget: remote.hasSingleTarget)[kind]),
+                    units: profile.values.units,
+                    limits: nil,
+                    singleTarget: remote.hasSingleTarget
+                )
+            }
+
+            if remote.supports(.save, in: commands) || remote.supports(.delete, in: commands) {
+                actionsSection(profile)
+            }
+        }
+        .toolbar {
+            if remote.supports(.save, in: commands) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Edit") { editing = true }
+                        .disabled(editBlocker != nil || anyPending)
+                }
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            if remote.supports(.activate, in: commands) {
+                activateButton
+            }
+        }
+        .sheet(isPresented: $editing) {
+            if let profileSet {
+                ProfileEditorSheet(remote: remote, mode: .edit(profile), profileSet: profileSet) {
+                    editing = false
+                }
+            }
+        }
+        .sheet(isPresented: $renaming) {
+            if let profileSet {
+                ProfileRenameSheet(remote: remote, profile: profile, profileSet: profileSet, isActive: isActive) {
+                    renaming = false
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func actionsSection(_ profile: TherapyProfile) -> some View {
+        let canDelete = remote.supports(.delete, in: commands) && !isActive && !profile.isDefault
+        Section(footer: actionsFooter(profile)) {
+            if remote.supports(.save, in: commands), !profile.isDefault {
+                Button("Rename Profile") { renaming = true }
+                    .disabled(editBlocker != nil || anyPending)
+            }
+            if remote.supports(.delete, in: commands), !profile.isDefault, !isActive {
+                Button("Delete Profile", role: .destructive) { alertType = .confirmDelete }
+                    .disabled(!canDelete || anyPending)
+            }
+        }
+    }
+
+    private func actionsFooter(_ profile: TherapyProfile) -> Text {
+        if let editBlocker, remote.supports(.save, in: commands) { return Text(editBlocker) }
+        if profile.isDefault { return Text("The Default profile always exists. It can be edited, but not renamed or deleted.") }
+        if isActive { return Text("The active profile can't be deleted. Activate another profile first.") }
+        return Text("")
+    }
+
+    private var activateButton: some View {
+        let isSending = tracker.isBusy(key: activateKey)
+        return Button {
+            alertType = .confirmActivate
+        } label: {
+            Group {
+                if isSending {
+                    HStack {
+                        ProgressView().scaleEffect(0.8)
+                        Text("Waiting for \(remote.appName)...")
+                    }
+                } else if anyPending {
+                    Text("Another Profile Command Is Pending")
+                } else {
+                    Text(isActive ? "Active Profile" : "Activate Profile")
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(isActive || anyPending)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
+    private func alert(_ type: AlertType) -> Alert {
+        switch type {
+        case .confirmActivate:
+            return Alert(
+                title: Text("Activate \(name) in \(remote.appName)?"),
+                message: Text("\(remote.appName) replaces its correction range, carb ratios, basal rates and insulin sensitivities with these values and writes the basal rates to the pump. Dosing changes right away."),
+                primaryButton: .default(Text("Activate")) { send(.activate) },
+                secondaryButton: .cancel()
+            )
+        case .confirmDelete:
+            return Alert(
+                title: Text("Delete \(name)?"),
+                message: Text("\(remote.appName) removes this profile. This can't be undone from LoopFollow."),
+                primaryButton: .destructive(Text("Delete")) { send(.delete) },
+                secondaryButton: .cancel()
+            )
+        case let .result(kind, success, message):
+            return Alert(
+                title: Text(ProfileCommandFlow.resultTitle(kind: kind, success: success, message: message, remote: remote)),
+                message: Text(message),
+                dismissButton: .default(Text("OK")) {
+                    if success { presentationMode.wrappedValue.dismiss() }
+                }
+            )
+        }
+    }
+
+    private func send(_ kind: ProfileCommandKind) {
+        guard let profile else { return }
+        let command: ProfileCommand = kind == .delete ? .delete(profile) : .activate(profile)
+        let verb = kind == .delete ? "delete" : "activate"
+        ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to \(verb) \(profile.name) in \(remote.appName).") { message in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                alertType = .result(kind: kind, success: false, message: message)
+            }
+        }
+    }
+}
+
+/// Renames a profile: a save of its unchanged values under the new name, reviewed before sending.
+struct ProfileRenameSheet: View {
+    let remote: ProfileRemote
+    let profile: TherapyProfile
+    let profileSet: TherapyProfileSet
+    let isActive: Bool
+    let onFinished: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+
+    private var problem: String? {
+        if ProfileValidation.normalizedName(name) == profile.name { return "Enter a new name." }
+        return ProfileValidation.nameProblem(name, existingNames: profileSet.profiles.map(\.name), originalName: profile.name)
+    }
+
+    private var command: ProfileCommand {
+        .save(name: ProfileValidation.normalizedName(name), original: profile, values: profile.values)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(header: Text("New Name"), footer: footer) {
+                    TextField(profile.name, text: $name)
+                        .autocorrectionDisabled()
+                }
+            }
+            .navigationTitle("Rename \(profile.name)")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    NavigationLink("Review") {
+                        ProfileReviewView(
+                            remote: remote,
+                            command: command,
+                            baseline: profile,
+                            isActive: false,
+                            limits: profileSet.limits,
+                            onFinished: onFinished
+                        )
+                    }
+                    .disabled(problem != nil)
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        Group {
+            if let problem, !name.isEmpty {
+                Text(problem).foregroundColor(.red)
+            } else {
+                Text("The values stay the same\(isActive ? " and the profile stays active" : ""). Up to \(ProfileValidation.maxNameLength) characters, not “Default”, no period (.), and not starting with $.")
+            }
+        }
+    }
+}

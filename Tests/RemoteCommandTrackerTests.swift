@@ -86,7 +86,7 @@ struct RemoteCommandTrackerTests {
     @Test("Loop profile switch acks resolve the profile named in the message")
     func loopProfileAdapter() {
         let tracker = RemoteCommandTracker(timeout: 60)
-        let sickDay = LoopProfileAckAdapter.key(for: "Sick Day")
+        let sickDay = ProfileRemote.loop.key(.activate, name: "Sick Day")
         tracker.begin(key: sickDay)
         let lateSport: [AnyHashable: Any] = [
             "command_type": "profile_switch",
@@ -104,5 +104,76 @@ struct RemoteCommandTrackerTests {
         #expect(tracker.states[sickDay] == .done(success: false, message: "Command failed: Profile 'Sick Day' not activated: Communication Failure"))
         #expect(LoopProfileAckAdapter.resolution(for: ["command_type": "profile_switch", "command_status": "failed"]) == nil)
         #expect(LoopProfileAckAdapter.resolution(for: ["command_type": "carbs_edit", "command_status": "success"]) == nil)
+    }
+
+    @Test("Loop profile save and delete acks resolve by command type and name, renames by the new name")
+    func loopProfileSaveDelete() {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let rename = ProfileRemote.loop.key(.save, name: "It's School")
+        let delete = ProfileRemote.loop.key(.delete, name: "Old")
+        #expect(rename == "loop-profile-save:It's School")
+        #expect(delete == "loop-profile-delete:Old")
+        tracker.begin(key: rename)
+        tracker.begin(key: delete)
+        let wrongType: [AnyHashable: Any] = [
+            "command_type": "profile_delete",
+            "command_status": "success",
+            "aps": ["alert": ["body": "Profile 'It's School' saved"]],
+        ]
+        #expect(tracker.handleNotification(userInfo: wrongType) == false)
+        let saved: [AnyHashable: Any] = [
+            "command_type": "profile_save",
+            "command_status": "success",
+            "aps": ["alert": ["title": "Command Successful", "body": "Profile 'It's School' saved"]],
+        ]
+        #expect(tracker.handleNotification(userInfo: saved) == true)
+        #expect(tracker.states[rename] == .done(success: true, message: "Profile 'It's School' saved"))
+        let notDeleted: [AnyHashable: Any] = [
+            "command_type": "profile_delete",
+            "command_status": "failed",
+            "aps": ["alert": ["body": "Command failed: Profile 'Old' not deleted: Profile is active"]],
+        ]
+        #expect(tracker.handleNotification(userInfo: notDeleted) == true)
+        #expect(tracker.states[delete] == .done(success: false, message: "Command failed: Profile 'Old' not deleted: Profile is active"))
+        #expect(LoopProfileAckAdapter.profileName(in: "Profile 'A' not saved: conflict", kind: .save) == "A")
+        #expect(LoopProfileAckAdapter.profileName(in: "Profile 'A' saved", kind: .delete) == nil)
+    }
+
+    @Test("Trio profile acks match the command id and fall back to a profile message")
+    func trioProfileAck() throws {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let command = try ProfileCommand.delete(TherapyProfile(name: "Weekend", store: Self.profileStore()))
+        let key = ProfileRemote.trio.key(for: command)
+        #expect(key == "trio-profile-delete:Weekend")
+        tracker.begin(key: key)
+        tracker.trioAcks.register(commandID: "CMD-1", key: key, successMessage: ProfileRemote.trio.successMessage(command), failureMessage: ProfileRemote.trio.failureMessage(command))
+        #expect(tracker.handleNotification(userInfo: ["command_status": "success", "command_id": "OTHER", "command_type": "delete_profile"]) == false)
+        #expect(tracker.handleNotification(userInfo: ["command_status": "success", "command_id": "CMD-1", "command_type": "delete_profile"]) == true)
+        #expect(tracker.states[key] == .done(success: true, message: "Profile 'Weekend' deleted"))
+        #expect(ProfileRemote.isProfileCommandKey(key))
+        #expect(ProfileRemote.isProfileCommandKey("loop-profile-switch:Sport"))
+        #expect(!ProfileRemote.isProfileCommandKey("SYNC-1"))
+        #expect(tracker.isBusy(keyPrefixes: ProfileRemote.trio.keyPrefixes) == false)
+    }
+
+    @Test("profile commands are gated on the names each app lists")
+    func gating() {
+        #expect(ProfileRemote.loop.supports(.save, in: ["profile-switch", "profile-save"]))
+        #expect(!ProfileRemote.loop.supports(.delete, in: ["profile-switch", "profile-save"]))
+        #expect(ProfileRemote.trio.supports(.activate, in: ["switch_profile"]))
+        #expect(!ProfileRemote.trio.supportsAny(in: ["edit_meal", "delete_meal", "profile-save"]))
+        #expect(ProfileRemote.loop.supportsAny(in: ["profile-delete"]))
+    }
+
+    private static func profileStore() throws -> NSProfile.Store {
+        let json = """
+        {"timezone": "UTC", "units": "mg/dL",
+         "basal": [{"time": "00:00", "value": 1, "timeAsSeconds": 0}],
+         "carbratio": [{"time": "00:00", "value": 10, "timeAsSeconds": 0}],
+         "sens": [{"time": "00:00", "value": 50, "timeAsSeconds": 0}],
+         "target_low": [{"time": "00:00", "value": 100, "timeAsSeconds": 0}],
+         "target_high": [{"time": "00:00", "value": 110, "timeAsSeconds": 0}]}
+        """
+        return try JSONDecoder().decode(NSProfile.Store.self, from: Data(json.utf8))
     }
 }

@@ -1,0 +1,266 @@
+// LoopFollow
+// ProfileReviewView.swift
+
+import SwiftUI
+
+/// One row of a schedule comparison: the value in effect from `seconds` before and after the change.
+struct ProfileDiffRow: Equatable, Identifiable {
+    let seconds: Int
+    let old: String
+    let new: String
+
+    var id: Int { seconds }
+    var changed: Bool { old != new }
+}
+
+enum ProfileDiff {
+    /// The value in effect at each time either schedule changes value, before and after.
+    static func rows(old: [EditableSegment], new: [EditableSegment], text: (EditableSegment) -> String) -> [ProfileDiffRow] {
+        let times = Set(old.map(\.seconds) + new.map(\.seconds)).sorted()
+        func effective(_ segments: [EditableSegment], at seconds: Int) -> String {
+            segments.last { $0.seconds <= seconds }.map(text) ?? "—"
+        }
+        return times.map { ProfileDiffRow(seconds: $0, old: effective(old, at: $0), new: effective(new, at: $0)) }
+    }
+}
+
+/// Shows exactly what a profile save sends, compared with the profile it starts from, and sends it after
+/// confirmation and device authentication.
+struct ProfileReviewView: View {
+    let remote: ProfileRemote
+    let command: ProfileCommand
+    /// The profile being changed, or the one a new profile is copied from.
+    let baseline: TherapyProfile
+    let isActive: Bool
+    let limits: ProfileEditLimits?
+    let onFinished: () -> Void
+
+    @ObservedObject private var tracker = RemoteCommandTracker.shared
+    @State private var alert: AlertType?
+    @State private var showJSON = false
+
+    private enum AlertType: Identifiable {
+        case confirm
+        case result(success: Bool, message: String)
+
+        var id: String {
+            switch self {
+            case .confirm: return "confirm"
+            case let .result(success, message): return "result-\(success)-\(message)"
+            }
+        }
+    }
+
+    private var values: TherapyProfileValues {
+        if case let .save(_, _, values) = command { return values }
+        return baseline.values
+    }
+
+    private var original: TherapyProfile? {
+        if case let .save(_, original, _) = command { return original }
+        return nil
+    }
+
+    private var key: String { remote.key(for: command) }
+
+    private var isSending: Bool { tracker.isBusy(key: key) }
+
+    private var otherPending: Bool {
+        !isSending && ProfileCommandFlow.isAnyPending(tracker, remote: remote)
+    }
+
+    private var problems: [String] {
+        guard let limits else { return ["Profiles can not be changed without the limits from \(remote.appName)."] }
+        return ProfileValidation.problems(values, limits: limits)
+    }
+
+    private var pushSize: Int? {
+        guard case let .save(name, original, values) = command else { return nil }
+        switch remote {
+        case .loop:
+            return LoopAPNSService().profileSavePushSize(name: name, originalName: original?.name, baseFingerprint: original?.fingerprint, values: values)
+        case .trio:
+            return PushNotificationManager().profileSavePushSize(name: name, originalName: original?.name, baseFingerprint: original?.fingerprint, values: values)
+        }
+    }
+
+    private var isTooLarge: Bool {
+        (pushSize ?? 0) > ProfilePushSize.reviewLimit(for: remote)
+    }
+
+    private var canSend: Bool {
+        problems.isEmpty && !isTooLarge && !isSending && !otherPending
+    }
+
+    var body: some View {
+        let size = pushSize
+        List {
+            Section {
+                Text(summary)
+                if isActive {
+                    ActiveProfileWarning(remote: remote)
+                }
+            }
+
+            ForEach(ProfileScheduleKind.allCases) { kind in
+                diffSection(kind)
+            }
+
+            Section(header: Text("Sent to \(remote.appName)"), footer: sizeFooter(size)) {
+                LabeledValueRow(label: "Name", value: command.targetName)
+                if let original {
+                    if original.name != command.targetName {
+                        LabeledValueRow(label: "Renames", value: original.name)
+                    }
+                    LabeledValueRow(label: "Based on version", value: original.fingerprint)
+                }
+                LabeledValueRow(label: "Units", value: values.units)
+                DisclosureGroup("Exact values", isExpanded: $showJSON) {
+                    Text(Self.jsonText(values))
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                }
+            }
+
+            if !problems.isEmpty {
+                Section(header: Text("Can't Send")) {
+                    ForEach(problems, id: \.self) { Text($0).foregroundColor(.red) }
+                }
+            }
+
+            Section {
+                ProfileCareTeamNote()
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
+            Button {
+                alert = .confirm
+            } label: {
+                Group {
+                    if isSending {
+                        HStack {
+                            ProgressView().scaleEffect(0.8)
+                            Text("Waiting for \(remote.appName)...")
+                        }
+                    } else if otherPending {
+                        Text("Another Profile Command Is Pending")
+                    } else {
+                        Text(isActive ? "Send and Apply Now" : "Send to \(remote.appName)")
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(isActive ? .red : .accentColor)
+            .controlSize(.large)
+            .disabled(!canSend)
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(.bar)
+        }
+        .navigationTitle("Review")
+        .navigationBarTitleDisplayMode(.inline)
+        .onProfileCommandResult(keys: [key]) { _, success, message in
+            alert = .result(success: success, message: message)
+        }
+        .alert(item: $alert) { type in
+            switch type {
+            case .confirm:
+                return Alert(
+                    title: Text(confirmTitle),
+                    message: Text(confirmMessage),
+                    primaryButton: isActive ? .destructive(Text("Send"), action: send) : .default(Text("Send"), action: send),
+                    secondaryButton: .cancel()
+                )
+            case let .result(success, message):
+                return Alert(
+                    title: Text(ProfileCommandFlow.resultTitle(kind: .save, success: success, message: message, remote: remote)),
+                    message: Text(message),
+                    dismissButton: .default(Text("OK")) {
+                        if success { onFinished() }
+                    }
+                )
+            }
+        }
+    }
+
+    private var summary: String {
+        if let original {
+            if original.name != command.targetName {
+                return "Rename “\(original.name)” to “\(command.targetName)” in \(remote.appName)."
+            }
+            return "Save these changes to “\(original.name)” in \(remote.appName). Changed values are marked."
+        }
+        return "Create “\(command.targetName)” in \(remote.appName), starting from “\(baseline.name)”. Values that differ from “\(baseline.name)” are marked."
+    }
+
+    private var confirmTitle: String {
+        if isActive { return "Change the Active Profile?" }
+        return original == nil ? "Create \(command.targetName)?" : "Save \(command.targetName)?"
+    }
+
+    private var confirmMessage: String {
+        if isActive {
+            return "\(remote.appName) starts dosing with these values as soon as it gets the command, and sends the new basal rates to the pump."
+        }
+        return "\(remote.appName) saves the profile. Dosing does not change until the profile is activated."
+    }
+
+    private func diffSection(_ kind: ProfileScheduleKind) -> some View {
+        let unitText = kind.unitText(glucoseUnits: values.units)
+        let singleTarget = remote.hasSingleTarget
+        let old = ProfileDraft(baseline.values, singleTarget: singleTarget)[kind]
+        let new = ProfileDraft(values, singleTarget: singleTarget)[kind]
+        let rows = ProfileDiff.rows(old: old, new: new) { ProfileValueFormat.segmentText($0, kind: kind, limits: limits, singleTarget: singleTarget) }
+        let changed = rows.contains(where: \.changed) || old.map(\.seconds) != new.map(\.seconds)
+        return Section(header: Text(kind.title), footer: Text(changed ? "Before → after, in \(unitText)." : "Unchanged, in \(unitText).")) {
+            ForEach(rows) { row in
+                HStack {
+                    Text(ProfileValueFormat.timeText(row.seconds))
+                    Spacer()
+                    if row.changed {
+                        Text(row.old)
+                            .foregroundColor(.secondary)
+                            .strikethrough()
+                        Image(systemName: "arrow.right")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Text(row.new)
+                            .bold()
+                            .foregroundColor(.orange)
+                    } else {
+                        Text(row.new).foregroundColor(.secondary)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private func sizeFooter(_ size: Int?) -> Text {
+        guard let size else {
+            return Text("The size of the command can not be computed until LoopFollow's own APNS credentials are set up in App Settings → APN.")
+        }
+        if size > ProfilePushSize.reviewLimit(for: remote) {
+            return Text(ProfilePushSize.tooLargeMessage(size)).foregroundColor(.red)
+        }
+        return Text("Command size: about \(size) of \(APNSDelivery.maxPayloadBytes) bytes.")
+    }
+
+    private func send() {
+        ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change \(command.targetName) in \(remote.appName).") { message in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                alert = .result(success: false, message: message)
+            }
+        }
+    }
+
+    static func jsonText(_ values: TherapyProfileValues) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(values), let text = String(data: data, encoding: .utf8) else { return "" }
+        return text
+    }
+}

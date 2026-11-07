@@ -54,8 +54,12 @@ final class RemoteCommandTracker: ObservableObject {
 
     /// True while any command whose key starts with `prefix` waits for its reply.
     func isBusy(keyPrefix prefix: String) -> Bool {
+        isBusy(keyPrefixes: [prefix])
+    }
+
+    func isBusy(keyPrefixes prefixes: [String]) -> Bool {
         states.contains { key, state in
-            if case .pending = state { return key.hasPrefix(prefix) }
+            if case .pending = state { return prefixes.contains { key.hasPrefix($0) } }
             return false
         }
     }
@@ -71,6 +75,12 @@ final class RemoteCommandTracker: ObservableObject {
         }
     }
 
+    /// The key as it may be logged: the command kind for a profile command, whose key holds the profile name.
+    static func logKey(_ key: String) -> String {
+        guard ProfileRemote.isProfileCommandKey(key), let separator = key.firstIndex(of: ":") else { return LogRedactor.tail(key) }
+        return String(key[..<separator])
+    }
+
     /// Clears a terminal state once the UI has acted on it.
     func consume(key: String) {
         onMain {
@@ -84,9 +94,10 @@ final class RemoteCommandTracker: ObservableObject {
         guard let resolution = trioAcks.resolution(for: userInfo)
             ?? LoopCarbAckAdapter.resolution(for: userInfo)
             ?? LoopProfileAckAdapter.resolution(for: userInfo)
+            ?? LoopScheduledSwitchesAckAdapter.resolution(for: userInfo)
         else { return false }
         guard isBusy(key: resolution.key) else {
-            LogManager.shared.log(category: .apns, message: "Ack for \(LogRedactor.tail(resolution.key)) matched no pending command")
+            LogManager.shared.log(category: .apns, message: "Ack for \(Self.logKey(resolution.key)) matched no pending command")
             return false
         }
         resolve(key: resolution.key, success: resolution.success, message: resolution.message)
@@ -98,31 +109,39 @@ final class RemoteCommandTracker: ObservableObject {
     }
 }
 
-/// Correlates Trio's return push with the meal a command was sent for via the per-send command id.
+/// Correlates Trio's return push with the meal or profile a command was sent for via the per-send command id.
 final class TRCMealAckAdapter {
-    private var keys: [String: String] = [:]
+    private struct Entry {
+        let key: String
+        let successMessage: String?
+        let failureMessage: String?
+    }
 
-    func register(commandID: String, key: String) {
-        keys[commandID] = key
+    private var entries: [String: Entry] = [:]
+
+    /// The messages are used when the reply has no alert body.
+    func register(commandID: String, key: String, successMessage: String? = nil, failureMessage: String? = nil) {
+        entries[commandID] = Entry(key: key, successMessage: successMessage, failureMessage: failureMessage)
     }
 
     func unregister(commandID: String) {
-        keys[commandID] = nil
+        entries[commandID] = nil
     }
 
     func resolution(for userInfo: [AnyHashable: Any]) -> RemoteCommandTracker.Resolution? {
         guard let status = userInfo["command_status"] as? String,
               let commandID = userInfo["command_id"] as? String,
-              let key = keys[commandID]
+              let entry = entries[commandID]
         else { return nil }
-        keys[commandID] = nil
+        entries[commandID] = nil
         let success = status == "success"
         let result = userInfo["result"] as? String
         LogManager.shared.log(category: .apns, message: "TRC ack: status=\(status) result=\(result ?? "-") command_id=\(commandID)")
+        let registered = success ? entry.successMessage : entry.failureMessage
         return RemoteCommandTracker.Resolution(
-            key: key,
+            key: entry.key,
             success: success,
-            message: alertBody(userInfo) ?? Self.defaultMessage(result: result, success: success)
+            message: alertBody(userInfo) ?? registered ?? Self.defaultMessage(result: result, success: success)
         )
     }
 
@@ -159,31 +178,54 @@ enum LoopCarbAckAdapter {
     }
 }
 
-/// Matches Loop's return push for a profile switch by the profile name in its message
-/// ("Profile '<name>' activated" or "... Profile '<name>' not activated: <reason>").
+/// Matches Loop's return push for a profile command by the profile name in its message
+/// ("Profile '<name>' activated|saved|deleted" or "... Profile '<name>' not activated|saved|deleted: <reason>").
 enum LoopProfileAckAdapter {
-    static let keyPrefix = "loop-profile-switch:"
-    /// Pump programming and both pushes can take a while; a missing reply does not mean the switch failed.
-    static let timeout: TimeInterval = 180
-    static let timeoutMessage = "Loop has not replied. The switch may still complete; the list shows the active profile once Loop uploads it. Check it before sending again."
-
-    static func key(for name: String) -> String {
-        keyPrefix + name
-    }
+    static let commandTypes: [String: ProfileCommandKind] = [
+        "profile_switch": .activate,
+        "profile_save": .save,
+        "profile_delete": .delete,
+    ]
 
     static func resolution(for userInfo: [AnyHashable: Any]) -> RemoteCommandTracker.Resolution? {
-        guard userInfo["command_type"] as? String == "profile_switch",
+        guard let commandType = userInfo["command_type"] as? String,
+              let kind = commandTypes[commandType],
               let status = userInfo["command_status"] as? String,
               let body = alertBody(userInfo),
-              let name = profileName(in: body)
+              let name = profileName(in: body, kind: kind)
         else { return nil }
-        LogManager.shared.log(category: .apns, message: "Loop ack: type=profile_switch status=\(status)")
-        return RemoteCommandTracker.Resolution(key: key(for: name), success: status == "success", message: body)
+        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
+        return RemoteCommandTracker.Resolution(key: ProfileRemote.loop.key(kind, name: name), success: status == "success", message: body)
     }
 
-    static func profileName(in message: String) -> String? {
-        guard let match = message.firstMatch(of: /Profile '(.+)' (?:not )?activated/) else { return nil }
-        return String(match.1)
+    static func profileName(in message: String, kind: ProfileCommandKind) -> String? {
+        let match: Substring?
+        switch kind {
+        case .activate: match = message.firstMatch(of: /Profile '(.+)' (?:not )?activated/)?.1
+        case .save: match = message.firstMatch(of: /Profile '(.+)' (?:not )?saved/)?.1
+        case .delete: match = message.firstMatch(of: /Profile '(.+)' (?:not )?deleted/)?.1
+        case .saveScheduledSwitches: match = nil
+        }
+        return match.map(String.init)
+    }
+}
+
+/// Matches Loop's return push for a scheduled switches save by its command type; only one can be pending.
+enum LoopScheduledSwitchesAckAdapter {
+    static let commandType = "profile_scheduled_switches_save"
+
+    static func resolution(for userInfo: [AnyHashable: Any]) -> RemoteCommandTracker.Resolution? {
+        guard userInfo["command_type"] as? String == commandType,
+              let status = userInfo["command_status"] as? String
+        else { return nil }
+        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
+        let success = status == "success"
+        let fallback = success ? "Scheduled switches saved" : "Scheduled switches not saved"
+        return RemoteCommandTracker.Resolution(
+            key: ProfileRemote.loop.key(.saveScheduledSwitches, name: ProfileCommand.scheduledSwitchesTarget),
+            success: success,
+            message: alertBody(userInfo) ?? fallback
+        )
     }
 }
 
@@ -224,7 +266,7 @@ extension RemoteCommandTracker {
     private func finishTrioSend(key: String, commandID: String, success: Bool, error: String?, completion: @escaping (Bool, String?) -> Void) {
         DispatchQueue.main.async {
             if success {
-                LogManager.shared.log(category: .apns, message: "Meal command sent command_id=\(commandID) meal_id=\(key)")
+                LogManager.shared.log(category: .apns, message: "TRC command sent command_id=\(commandID) key=\(Self.logKey(key))")
             } else {
                 self.trioAcks.unregister(commandID: commandID)
                 self.resolve(key: key, success: false, message: error ?? "The command could not be sent.")
@@ -262,12 +304,44 @@ extension RemoteCommandTracker {
         }
     }
 
-    func sendLoopProfileSwitch(profile: LoopProfile, completion: @escaping (Bool, String?) -> Void) {
-        let key = LoopProfileAckAdapter.key(for: profile.name)
-        begin(key: key, timeout: LoopProfileAckAdapter.timeout, timeoutMessage: LoopProfileAckAdapter.timeoutMessage)
-        guard let otp = loopOTP(key: key, completion: completion) else { return }
-        LoopAPNSService().sendProfileSwitch(name: profile.name, fingerprint: profile.fingerprint, otp: otp) { [weak self] success, error in
-            self?.finishLoopSend(key: key, success: success, error: error, completion: completion)
+    /// Sends a profile command and tracks it under `ProfileRemote.key(for:)` until the reply or the timeout.
+    func sendProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote, completion: @escaping (Bool, String?) -> Void) {
+        let key = remote.key(for: command)
+        begin(key: key, timeout: ProfileRemote.timeout, timeoutMessage: remote.timeoutMessage)
+        switch remote {
+        case .loop:
+            guard let otp = loopOTP(key: key, completion: completion) else { return }
+            let finish: (Bool, String?) -> Void = { [weak self] success, error in
+                self?.finishLoopSend(key: key, success: success, error: error, completion: completion)
+            }
+            let service = LoopAPNSService()
+            switch command {
+            case let .activate(profile):
+                service.sendProfileSwitch(name: profile.name, fingerprint: profile.fingerprint, otp: otp, completion: finish)
+            case let .save(name, original, values):
+                service.sendProfileSave(name: name, originalName: original?.name, baseFingerprint: original?.fingerprint, values: values, otp: otp, completion: finish)
+            case let .delete(profile):
+                service.sendProfileDelete(name: profile.name, fingerprint: profile.fingerprint, otp: otp, completion: finish)
+            case let .saveScheduledSwitches(entries, baseFingerprint):
+                service.sendScheduledSwitchesSave(entries: entries, baseFingerprint: baseFingerprint, otp: otp, completion: finish)
+            }
+        case .trio:
+            let commandID = UUID().uuidString
+            trioAcks.register(commandID: commandID, key: key, successMessage: remote.successMessage(command), failureMessage: remote.failureMessage(command))
+            let finish: (Bool, String?) -> Void = { [weak self] success, error in
+                self?.finishTrioSend(key: key, commandID: commandID, success: success, error: error, completion: completion)
+            }
+            let manager = PushNotificationManager()
+            switch command {
+            case let .activate(profile):
+                manager.sendProfileSwitchPushNotification(name: profile.name, fingerprint: profile.fingerprint, commandID: commandID, completion: finish)
+            case let .save(name, original, values):
+                manager.sendProfileSavePushNotification(name: name, originalName: original?.name, baseFingerprint: original?.fingerprint, values: values, commandID: commandID, completion: finish)
+            case let .delete(profile):
+                manager.sendProfileDeletePushNotification(name: profile.name, fingerprint: profile.fingerprint, commandID: commandID, completion: finish)
+            case let .saveScheduledSwitches(entries, baseFingerprint):
+                manager.sendScheduledSwitchesSavePushNotification(entries: entries, baseFingerprint: baseFingerprint, commandID: commandID, completion: finish)
+            }
         }
     }
 
@@ -292,7 +366,7 @@ extension RemoteCommandTracker {
         DispatchQueue.main.async {
             if success {
                 TOTPService.shared.markTOTPAsUsed(qrCodeURL: Storage.shared.loopAPNSQrCodeURL.value)
-                LogManager.shared.log(category: .apns, message: "Loop command sent for \(LogRedactor.tail(key))")
+                LogManager.shared.log(category: .apns, message: "Loop command sent for \(Self.logKey(key))")
             } else {
                 self.resolve(key: key, success: false, message: error ?? "The command could not be sent.")
             }
