@@ -145,6 +145,50 @@ struct ProfileCareTeamNote: View {
     }
 }
 
+/// Lists where a profile gives more insulin than the one it is compared with.
+struct MoreInsulinWarning: View {
+    let increases: [ProfileInsulinIncrease]
+    let basalTotal: (old: Double, new: Double)?
+    /// The profile the values are compared with.
+    let comparedWith: String
+    /// True when dosing changes as soon as the command arrives.
+    let appliesNow: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label {
+                Text("More insulin than “\(comparedWith)”")
+                    .font(.callout.weight(.semibold))
+            } icon: {
+                Image(systemName: "arrow.up.circle.fill")
+            }
+            .foregroundColor(.red)
+            ForEach(increases) { increase in
+                Text("• \(increase.text)")
+            }
+            if let basalTotal {
+                Text("• Basal per day \(Self.units(basalTotal.old)) → \(Self.units(basalTotal.new)) U")
+            }
+            Text(appliesNow
+                ? "More insulin raises the risk of lows. Check that these values are what was agreed, and watch glucose closely after sending."
+                : "More insulin raises the risk of lows once this profile is active. Check that these values are what was agreed.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    static func units(_ value: Double) -> String {
+        Localizer.formatToLocalizedString(value, maxFractionDigits: 2, minFractionDigits: 2)
+    }
+
+    /// One sentence for a confirmation alert, empty when nothing gives more insulin.
+    static func sentence(_ increases: [ProfileInsulinIncrease], comparedWith: String) -> String {
+        guard !increases.isEmpty else { return "" }
+        return "\n\nThis gives more insulin than “\(comparedWith)”: \(increases.map(\.text).joined(separator: "; "))."
+    }
+}
+
 /// The warning shown when a change applies to the profile that is in use.
 struct ActiveProfileWarning: View {
     let remote: ProfileRemote

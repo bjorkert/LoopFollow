@@ -108,14 +108,15 @@ struct TherapyProfilePreviewView: View {
     @State private var renaming = false
 
     private enum AlertType: Identifiable {
-        case confirmActivate
-        case confirmDelete
+        /// The confirmations carry the fingerprint of the profile they show.
+        case confirmActivate(fingerprint: String)
+        case confirmDelete(fingerprint: String)
         case result(kind: ProfileCommandKind, ProfileCommandResult)
 
         var id: String {
             switch self {
-            case .confirmActivate: return "activate"
-            case .confirmDelete: return "delete"
+            case let .confirmActivate(fingerprint): return "activate-\(fingerprint)"
+            case let .confirmDelete(fingerprint): return "delete-\(fingerprint)"
             case let .result(kind, result): return "result-\(kind)-\(result.success)-\(result.message)"
             }
         }
@@ -132,6 +133,13 @@ struct TherapyProfilePreviewView: View {
     private var isActive: Bool {
         guard let profile, let profileSet else { return false }
         return profileSet.isActive(profile)
+    }
+
+    /// The active profile, when this profile gives more insulin than it somewhere.
+    private var activationIncreases: (active: TherapyProfile, increases: [ProfileInsulinIncrease])? {
+        guard !isActive, let profile, let active = profileSet?.activeProfile else { return nil }
+        let increases = ProfileInsulinComparison.increases(from: active.values, to: profile.values)
+        return increases.isEmpty ? nil : (active, increases)
     }
 
     private var activateKey: String { remote.key(.activate, name: name) }
@@ -170,6 +178,14 @@ struct TherapyProfilePreviewView: View {
         List {
             Section(footer: Text("\(remote.appName) writes the basal rates to the pump when the profile is activated.")) {
                 Text(isActive ? "This is the active profile. \(remote.appName) doses insulin with these values." : "Review the profile before activating it in \(remote.appName).")
+                if let activationIncreases {
+                    MoreInsulinWarning(
+                        increases: activationIncreases.increases,
+                        basalTotal: ProfileInsulinComparison.basalTotalIncrease(from: activationIncreases.active.values, to: profile.values),
+                        comparedWith: activationIncreases.active.name,
+                        appliesNow: true
+                    )
+                }
             }
 
             ForEach(ProfileScheduleKind.allCases) { kind in
@@ -225,7 +241,7 @@ struct TherapyProfilePreviewView: View {
                     .disabled(editBlocker != nil || anyPending)
             }
             if remote.supports(.delete, in: commands), !profile.isDefault, !isActive {
-                Button("Delete Profile", role: .destructive) { alertType = .confirmDelete }
+                Button("Delete Profile", role: .destructive) { alertType = .confirmDelete(fingerprint: profile.fingerprint) }
                     .disabled(!canDelete || anyPending)
             }
         }
@@ -241,7 +257,7 @@ struct TherapyProfilePreviewView: View {
     private var activateButton: some View {
         let isSending = tracker.isBusy(key: activateKey)
         return Button {
-            alertType = .confirmActivate
+            if let profile { alertType = .confirmActivate(fingerprint: profile.fingerprint) }
         } label: {
             Group {
                 if isSending {
@@ -267,18 +283,20 @@ struct TherapyProfilePreviewView: View {
 
     private func alert(_ type: AlertType) -> Alert {
         switch type {
-        case .confirmActivate:
+        case let .confirmActivate(fingerprint):
             return Alert(
                 title: Text("Activate \(name) in \(remote.appName)?"),
-                message: Text("\(remote.appName) replaces its correction range, carb ratios, basal rates and insulin sensitivities with these values and writes the basal rates to the pump. Dosing changes right away."),
-                primaryButton: .default(Text("Activate")) { send(.activate) },
+                message: Text("\(remote.appName) replaces its correction range, carb ratios, basal rates and insulin sensitivities with these values and writes the basal rates to the pump. Dosing changes right away."
+                    + (profileSet.flatMap { ScheduledSwitches.holdText($0.scheduledSwitches) }.map { " " + $0 } ?? "")
+                    + MoreInsulinWarning.sentence(activationIncreases?.increases ?? [], comparedWith: activationIncreases?.active.name ?? "")),
+                primaryButton: .default(Text("Activate")) { send(.activate, fingerprint: fingerprint) },
                 secondaryButton: .cancel()
             )
-        case .confirmDelete:
+        case let .confirmDelete(fingerprint):
             return Alert(
                 title: Text("Delete \(name)?"),
                 message: Text("\(remote.appName) removes this profile. This can't be undone from LoopFollow."),
-                primaryButton: .destructive(Text("Delete")) { send(.delete) },
+                primaryButton: .destructive(Text("Delete")) { send(.delete, fingerprint: fingerprint) },
                 secondaryButton: .cancel()
             )
         case let .result(kind, result):
@@ -294,8 +312,15 @@ struct TherapyProfilePreviewView: View {
         }
     }
 
-    private func send(_ kind: ProfileCommandKind) {
+    private func send(_ kind: ProfileCommandKind, fingerprint: String) {
         guard let profile else { return }
+        guard profile.fingerprint == fingerprint else {
+            let message = "\(name) changed while the confirmation was open, so nothing was sent. Review it again."
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                alertType = .result(kind: kind, ProfileCommandResult(success: false, message: message))
+            }
+            return
+        }
         let command: ProfileCommand = kind == .delete ? .delete(profile) : .activate(profile)
         let verb = kind == .delete ? "delete" : "activate"
         ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to \(verb) \(profile.name) in \(remote.appName).") { message in

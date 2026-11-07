@@ -68,6 +68,10 @@ struct ProfileReviewView: View {
 
     private var key: String { remote.key(for: command) }
 
+    private var increases: [ProfileInsulinIncrease] {
+        ProfileInsulinComparison.increases(from: baseline.values, to: values)
+    }
+
     private var isSending: Bool { tracker.isBusy(key: key) }
 
     private var otherPending: Bool {
@@ -103,6 +107,14 @@ struct ProfileReviewView: View {
                 Text(summary)
                 if isActive {
                     ActiveProfileWarning(remote: remote)
+                }
+                if !increases.isEmpty {
+                    MoreInsulinWarning(
+                        increases: increases,
+                        basalTotal: ProfileInsulinComparison.basalTotalIncrease(from: baseline.values, to: values),
+                        comparedWith: original?.name ?? baseline.name,
+                        appliesNow: isActive
+                    )
                 }
             }
 
@@ -209,16 +221,26 @@ struct ProfileReviewView: View {
         return "Create “\(command.targetName)” in \(remote.appName), starting from “\(baseline.name)”. Values that differ from “\(baseline.name)” are marked."
     }
 
+    private var isRename: Bool {
+        original.map { $0.name != command.targetName } ?? false
+    }
+
     private var confirmTitle: String {
+        if isRename { return "Rename \(original?.name ?? "")?" }
         if isActive { return "Change the Active Profile?" }
         return original == nil ? "Create \(command.targetName)?" : "Save \(command.targetName)?"
     }
 
     private var confirmMessage: String {
+        if isRename {
+            return "Only the name changes. The values stay the same, so dosing does not change."
+        }
         if isActive {
             return "\(remote.appName) starts dosing with these values as soon as it gets the command, and sends the new basal rates to the pump."
+                + MoreInsulinWarning.sentence(increases, comparedWith: original?.name ?? baseline.name)
         }
-        return "\(remote.appName) saves the profile. Dosing does not change until the profile is activated."
+        return "\(remote.appName) saves the profile. Dosing does not change unless this profile is the active one in \(remote.appName) when the command arrives."
+            + MoreInsulinWarning.sentence(increases, comparedWith: original?.name ?? baseline.name)
     }
 
     private func diffSection(_ kind: ProfileScheduleKind) -> some View {
@@ -228,26 +250,35 @@ struct ProfileReviewView: View {
         let new = ProfileDraft(values, singleTarget: singleTarget)[kind]
         let rows = ProfileDiff.rows(old: old, new: new) { ProfileValueFormat.segmentText($0, kind: kind, limits: limits, singleTarget: singleTarget) }
         let changed = rows.contains(where: \.changed) || old.map(\.seconds) != new.map(\.seconds)
-        return Section(header: Text(kind.title), footer: Text(changed ? "Before → after, in \(unitText)." : "Unchanged, in \(unitText).")) {
+        let moreInsulin = increases.first { $0.kind == kind }?.periods ?? []
+        let footer = changed
+            ? "Before → after, in \(unitText)." + (moreInsulin.isEmpty ? "" : " Red values give more insulin.")
+            : "Unchanged, in \(unitText)."
+        return Section(header: Text(singleTarget && kind.isRange ? "Glucose Target" : kind.title), footer: Text(footer)) {
             ForEach(rows) { row in
-                HStack {
+                ProfileRowLayout {
                     Text(ProfileValueFormat.timeText(row.seconds))
-                    Spacer()
+                } value: {
                     if row.changed {
-                        Text(row.old)
-                            .foregroundColor(.secondary)
-                            .strikethrough()
-                        Image(systemName: "arrow.right")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Text(row.new)
-                            .bold()
-                            .foregroundColor(.orange)
+                        HStack {
+                            Text(row.old)
+                                .foregroundColor(.secondary)
+                                .strikethrough()
+                            Image(systemName: "arrow.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(row.new)
+                                .bold()
+                                .foregroundColor(moreInsulin.contains { $0.lowerBound <= row.seconds && row.seconds < $0.upperBound } ? .red : .orange)
+                        }
                     } else {
                         Text(row.new).foregroundColor(.secondary)
                     }
                 }
-                .accessibilityElement(children: .combine)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(row.changed
+                    ? "\(ProfileValueFormat.timeText(row.seconds)), changed from \(row.old) to \(row.new)"
+                    : "\(ProfileValueFormat.timeText(row.seconds)), \(row.new)")
             }
         }
     }
