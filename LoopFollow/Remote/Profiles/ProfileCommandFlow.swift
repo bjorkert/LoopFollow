@@ -43,11 +43,18 @@ enum ProfileCommandFlow {
         }
     }
 
-    /// True when the screen that sent the command closes after the result: on success, and when no reply came,
-    /// because the change may have been applied and the profile list shows the outcome. A refusal keeps the
-    /// screen open so the values can be corrected.
-    static func leavesAfterResult(success: Bool, message: String, remote: ProfileRemote) -> Bool {
-        success || message == remote.timeoutMessage
+    /// True when the screen that sent the command closes after the result: on success; when no reply came,
+    /// because the change may have been applied; and when the profile changed or is gone on the phone, because
+    /// the screen's values are out of date. The profile list then shows the uploaded profiles. Any other refusal
+    /// keeps the screen open so the values can be corrected.
+    static func leavesAfterResult(_ result: ProfileCommandResult, remote: ProfileRemote) -> Bool {
+        result.success || result.outdated || result.message == remote.timeoutMessage
+    }
+
+    /// The reply text, with a note on what happens next when the profile was out of date.
+    static func resultMessage(_ result: ProfileCommandResult, remote: ProfileRemote) -> String {
+        guard result.outdated else { return result.message }
+        return result.message + "\n\nLoopFollow is loading the profiles \(remote.appName) uploaded. Open the profile again to see its current values."
     }
 
     /// Loads the newest profile document from Nightscout. Completes on the main queue, with nil when it can not be loaded.
@@ -87,10 +94,20 @@ enum ProfileCommandFlow {
     }
 }
 
+/// The outcome of a profile command as the tracker reports it.
+struct ProfileCommandResult: Equatable {
+    let success: Bool
+    let message: String
+    /// The phone refused because the profile changed or no longer exists there.
+    var outdated = false
+}
+
 /// Reports a finished profile command once, also when the view was left while it was pending.
 struct ProfileCommandResultModifier: ViewModifier {
     let keys: [String]
-    let onResult: (String, Bool, String) -> Void
+    /// When set, the result of another command sent under the same key is dropped without a report.
+    let command: ProfileCommand?
+    let onResult: (String, ProfileCommandResult) -> Void
 
     @ObservedObject private var tracker = RemoteCommandTracker.shared
 
@@ -101,18 +118,23 @@ struct ProfileCommandResultModifier: ViewModifier {
     }
 
     private func check(_ key: String) {
-        guard case let .done(success, message) = tracker.states[key] else { return }
+        guard case let .done(success, message, outdated) = tracker.states[key] else { return }
         tracker.consume(key: key)
+        if let command, tracker.profileCommands[key] != command { return }
         // A result that arrives at once comes while the confirmation alert is still closing.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            onResult(key, success, message)
+            onResult(key, ProfileCommandResult(success: success, message: message, outdated: outdated))
         }
     }
 }
 
 extension View {
-    func onProfileCommandResult(keys: [String], perform: @escaping (String, Bool, String) -> Void) -> some View {
-        modifier(ProfileCommandResultModifier(keys: keys, onResult: perform))
+    func onProfileCommandResult(
+        keys: [String],
+        command: ProfileCommand? = nil,
+        perform: @escaping (String, ProfileCommandResult) -> Void
+    ) -> some View {
+        modifier(ProfileCommandResultModifier(keys: keys, command: command, onResult: perform))
     }
 }
 

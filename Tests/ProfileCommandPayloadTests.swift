@@ -41,6 +41,43 @@ struct ProfileCommandPayloadTests {
         try Self.assertCompact(JSONSerialization.jsonObject(with: viaSerialization))
     }
 
+    @Test("values are sent as the decimal numbers shown, in Loop and Trio commands")
+    func decimalEncoding() throws {
+        let values = TherapyProfileValues(
+            units: "mmol/L",
+            basal: [ProfileScheduleItem(seconds: 0, value: 0.7), ProfileScheduleItem(seconds: 43200, value: 0.1 + 0.2), ProfileScheduleItem(seconds: 64800, value: 1.15)],
+            carbRatio: [ProfileScheduleItem(seconds: 0, value: 12.3)],
+            sensitivity: [ProfileScheduleItem(seconds: 0, value: 2.9)],
+            target: [ProfileRangeItem(seconds: 0, low: 5.6, high: 6.1)]
+        )
+        let expected = [
+            "\"basal\":[[0,0.7],[43200,0.3],[64800,1.15]]",
+            "\"carbratio\":[[0,12.3]]",
+            "\"sens\":[[0,2.9]]",
+            "\"target\":[[0,5.6,6.1]]",
+        ]
+
+        let trio = try JSONEncoder().encode(CommandPayload(user: "u", commandType: .saveProfile, timestamp: 0, commandID: "C", profileName: "P", profile: values))
+        let trioText = String(decoding: trio, as: UTF8.self)
+        for fragment in expected {
+            #expect(trioText.contains(fragment), "Trio: \(fragment) in \(trioText)")
+        }
+
+        let loop = LoopAPNSCommands.profileSaveCommandPayload(name: "P", originalName: nil, baseFingerprint: nil, values: values, otp: "123456", now: now)
+        let loopText = try String(decoding: LoopAPNSCommands.apnsBody(loop), as: UTF8.self).replacingOccurrences(of: " ", with: "")
+        for fragment in expected {
+            #expect(loopText.contains(fragment), "Loop: \(fragment) in \(loopText)")
+        }
+        #expect(!trioText.contains("0000000") && !loopText.contains("0000000"))
+
+        // What the phone decodes has the fingerprint LoopFollow shows for the values.
+        let decoded = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(values)) as? [String: Any])
+        let basal = try #require(decoded["basal"] as? [[Double]]).map { ProfileScheduleItem(seconds: Int($0[0]), value: $0[1]) }
+        #expect(basal.map(\.value) == [0.7, 0.3, 1.15])
+        let roundTrip = TherapyProfileValues(units: values.units, basal: basal, carbRatio: values.carbRatio, sensitivity: values.sensitivity, target: values.target)
+        #expect(roundTrip.fingerprint == values.fingerprint)
+    }
+
     @Test("Loop profile save creates with name and values only")
     func loopSaveCreate() throws {
         let json = LoopAPNSCommands.profileSaveCommandPayload(name: "Weekend", originalName: nil, baseFingerprint: nil, values: Self.vector, otp: "123456", now: now)

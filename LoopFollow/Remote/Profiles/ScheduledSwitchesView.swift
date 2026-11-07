@@ -311,12 +311,12 @@ struct ScheduledSwitchesReviewView: View {
 
     private enum AlertType: Identifiable {
         case confirm
-        case result(success: Bool, message: String)
+        case result(ProfileCommandResult)
 
         var id: String {
             switch self {
             case .confirm: return "confirm"
-            case let .result(success, message): return "result-\(success)-\(message)"
+            case let .result(result): return "result-\(result.success)-\(result.message)"
             }
         }
     }
@@ -420,8 +420,8 @@ struct ScheduledSwitchesReviewView: View {
             pushSize = Self.computePushSize(entries, baseFingerprint: list.fingerprint, remote: remote)
             pushSizeComputed = true
         }
-        .onProfileCommandResult(keys: [key]) { _, success, message in
-            alert = .result(success: success, message: message)
+        .onProfileCommandResult(keys: [key], command: command) { _, result in
+            alert = .result(result)
         }
         .alert(item: $alert) { type in
             switch type {
@@ -432,12 +432,12 @@ struct ScheduledSwitchesReviewView: View {
                     primaryButton: .default(Text("Send"), action: send),
                     secondaryButton: .cancel()
                 )
-            case let .result(success, message):
+            case let .result(result):
                 return Alert(
-                    title: Text(ProfileCommandFlow.resultTitle(kind: .saveScheduledSwitches, success: success, message: message, remote: remote)),
-                    message: Text(message),
+                    title: Text(ProfileCommandFlow.resultTitle(kind: .saveScheduledSwitches, success: result.success, message: result.message, remote: remote)),
+                    message: Text(Self.resultMessage(result, remote: remote)),
                     dismissButton: .default(Text("OK")) {
-                        if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) { onFinished() }
+                        if ProfileCommandFlow.leavesAfterResult(result, remote: remote) { onFinished() }
                     }
                 )
             }
@@ -464,6 +464,11 @@ struct ScheduledSwitchesReviewView: View {
         }
     }
 
+    static func resultMessage(_ result: ProfileCommandResult, remote: ProfileRemote) -> String {
+        guard result.outdated else { return result.message }
+        return result.message + "\n\nLoopFollow is loading the scheduled switches \(remote.appName) uploaded. Open them again to review the current list."
+    }
+
     /// Why the reviewed list must not be sent now that `current` is the newest profile document, or nil.
     static func staleReason(baseFingerprint: String, entries: [ScheduledProfileSwitch], current: TherapyProfileSet?, remote: ProfileRemote) -> String? {
         guard let current else {
@@ -486,12 +491,12 @@ struct ScheduledSwitchesReviewView: View {
             checking = false
             if let reason = Self.staleReason(baseFingerprint: base, entries: entries, current: current, remote: remote) {
                 if let current { Observable.shared.therapyProfiles.set(current) }
-                alert = .result(success: false, message: reason)
+                alert = .result(ProfileCommandResult(success: false, message: reason, outdated: current != nil))
                 return
             }
             ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change the scheduled switches in \(remote.appName).") { message in
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    alert = .result(success: false, message: message)
+                    alert = .result(ProfileCommandResult(success: false, message: message))
                 }
             }
         }

@@ -110,13 +110,13 @@ struct TherapyProfilePreviewView: View {
     private enum AlertType: Identifiable {
         case confirmActivate
         case confirmDelete
-        case result(kind: ProfileCommandKind, success: Bool, message: String)
+        case result(kind: ProfileCommandKind, ProfileCommandResult)
 
         var id: String {
             switch self {
             case .confirmActivate: return "activate"
             case .confirmDelete: return "delete"
-            case let .result(kind, success, message): return "result-\(kind)-\(success)-\(message)"
+            case let .result(kind, result): return "result-\(kind)-\(result.success)-\(result.message)"
             }
         }
     }
@@ -159,9 +159,9 @@ struct TherapyProfilePreviewView: View {
             }
         }
         .navigationBarTitle(name, displayMode: .inline)
-        .onProfileCommandResult(keys: resultKeys) { key, success, message in
+        .onProfileCommandResult(keys: resultKeys) { key, result in
             let kind: ProfileCommandKind = key == activateKey ? .activate : .delete
-            alertType = .result(kind: kind, success: success, message: message)
+            alertType = .result(kind: kind, result)
         }
         .alert(item: $alertType) { type in alert(type) }
     }
@@ -281,12 +281,12 @@ struct TherapyProfilePreviewView: View {
                 primaryButton: .destructive(Text("Delete")) { send(.delete) },
                 secondaryButton: .cancel()
             )
-        case let .result(kind, success, message):
+        case let .result(kind, result):
             return Alert(
-                title: Text(ProfileCommandFlow.resultTitle(kind: kind, success: success, message: message, remote: remote)),
-                message: Text(message),
+                title: Text(ProfileCommandFlow.resultTitle(kind: kind, success: result.success, message: result.message, remote: remote)),
+                message: Text(ProfileCommandFlow.resultMessage(result, remote: remote)),
                 dismissButton: .default(Text("OK")) {
-                    if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) {
+                    if ProfileCommandFlow.leavesAfterResult(result, remote: remote) {
                         presentationMode.wrappedValue.dismiss()
                     }
                 }
@@ -300,7 +300,7 @@ struct TherapyProfilePreviewView: View {
         let verb = kind == .delete ? "delete" : "activate"
         ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to \(verb) \(profile.name) in \(remote.appName).") { message in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                alertType = .result(kind: kind, success: false, message: message)
+                alertType = .result(kind: kind, ProfileCommandResult(success: false, message: message))
             }
         }
     }

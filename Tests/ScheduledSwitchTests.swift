@@ -414,15 +414,16 @@ struct ScheduledSwitchTests {
         let command = ProfileCommand.saveScheduledSwitches([Self.weekend], baseFingerprint: "x")
         let key = ProfileRemote.trio.key(for: command)
         #expect(key == "trio-profile-scheduled-switches-save:scheduled-switches")
-        for (status, result, message) in [
-            ("success", "saved", "Scheduled switches saved"),
-            ("failed", "conflict", "Scheduled switches not saved"),
+        for (status, result, message, outdated) in [
+            ("success", "saved", "Scheduled switches saved", false),
+            ("failed", "conflict", "Scheduled switches not saved", true),
+            ("failed", "rejected", "Scheduled switches not saved", false),
         ] {
             let tracker = RemoteCommandTracker(timeout: 60)
             tracker.begin(key: key)
             tracker.trioAcks.register(commandID: "CMD", key: key, successMessage: ProfileRemote.trio.successMessage(command), failureMessage: ProfileRemote.trio.failureMessage(command))
             #expect(tracker.handleNotification(userInfo: ["command_status": status, "command_id": "CMD", "command_type": "save_scheduled_switches", "result": result]))
-            #expect(tracker.states[key] == .done(success: status == "success", message: message))
+            #expect(tracker.states[key] == .done(success: status == "success", message: message, outdated: outdated))
         }
         #expect(ProfileCommandFlow.resultTitle(kind: .saveScheduledSwitches, success: true, message: "", remote: .trio) == "Scheduled Switches Saved")
         #expect(ProfileCommandFlow.resultTitle(kind: .saveScheduledSwitches, success: false, message: "", remote: .trio) == "Scheduled Switches Not Saved")

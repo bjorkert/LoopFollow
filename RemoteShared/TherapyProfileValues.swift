@@ -84,14 +84,26 @@ struct TherapyProfileValues: Equatable, Encodable {
         ].joined(separator: ";")
     }
 
+    /// The decimals a value carries in a command, the same precision the fingerprint uses.
+    static let encodedDecimals = 3
+
+    /// `value` as the decimal number a command carries: rounded to `encodedDecimals`, so JSON holds `0.7`
+    /// for 0.7 and never its binary approximation.
+    static func encodedNumber(_ value: Double) -> Decimal {
+        Decimal(string: String(format: "%.\(encodedDecimals)f", value), locale: Locale(identifier: "en_US_POSIX")) ?? Decimal(value)
+    }
+
     /// The compact object for `JSONSerialization` (Loop commands).
     var jsonObject: [String: Any] {
-        [
+        func number(_ value: Double) -> NSDecimalNumber {
+            NSDecimalNumber(decimal: Self.encodedNumber(value))
+        }
+        return [
             "units": units,
-            "basal": basal.map { [$0.seconds, $0.value] as [Any] },
-            "carbratio": carbRatio.map { [$0.seconds, $0.value] as [Any] },
-            "sens": sensitivity.map { [$0.seconds, $0.value] as [Any] },
-            "target": target.map { [$0.seconds, $0.low, $0.high] as [Any] },
+            "basal": basal.map { [$0.seconds, number($0.value)] as [Any] },
+            "carbratio": carbRatio.map { [$0.seconds, number($0.value)] as [Any] },
+            "sens": sensitivity.map { [$0.seconds, number($0.value)] as [Any] },
+            "target": target.map { [$0.seconds, number($0.low), number($0.high)] as [Any] },
         ]
     }
 
@@ -109,7 +121,7 @@ struct TherapyProfileValues: Equatable, Encodable {
         func encode(to encoder: Encoder) throws {
             var container = encoder.unkeyedContainer()
             try container.encode(item.seconds)
-            try container.encode(item.value)
+            try container.encode(TherapyProfileValues.encodedNumber(item.value))
         }
     }
 
@@ -119,8 +131,8 @@ struct TherapyProfileValues: Equatable, Encodable {
         func encode(to encoder: Encoder) throws {
             var container = encoder.unkeyedContainer()
             try container.encode(item.seconds)
-            try container.encode(item.low)
-            try container.encode(item.high)
+            try container.encode(TherapyProfileValues.encodedNumber(item.low))
+            try container.encode(TherapyProfileValues.encodedNumber(item.high))
         }
     }
 

@@ -180,10 +180,42 @@ struct RemoteCommandTrackerTests {
         #expect(completed.contains(key))
         #expect(ProfileRemote.isProfileCommandKey(key))
 
-        #expect(ProfileCommandFlow.leavesAfterResult(success: false, message: ProfileRemote.loop.timeoutMessage, remote: .loop))
-        #expect(ProfileCommandFlow.leavesAfterResult(success: true, message: "Profile 'Weekday' saved", remote: .loop))
-        #expect(!ProfileCommandFlow.leavesAfterResult(success: false, message: "Command failed: Profile 'Weekday' not saved: conflict", remote: .loop))
-        #expect(!ProfileCommandFlow.leavesAfterResult(success: false, message: ProfileRemote.trio.timeoutMessage, remote: .loop))
+        #expect(ProfileCommandFlow.leavesAfterResult(.init(success: false, message: ProfileRemote.loop.timeoutMessage), remote: .loop))
+        #expect(ProfileCommandFlow.leavesAfterResult(.init(success: true, message: "Profile 'Weekday' saved"), remote: .loop))
+        #expect(!ProfileCommandFlow.leavesAfterResult(.init(success: false, message: "Command failed: Profile 'Weekday' not saved: The basal rate 3.5 U/hr is above the maximum basal rate"), remote: .loop))
+        #expect(!ProfileCommandFlow.leavesAfterResult(.init(success: false, message: ProfileRemote.trio.timeoutMessage), remote: .loop))
+        #expect(ProfileCommandFlow.leavesAfterResult(.init(success: false, message: "Profile 'Weekday' not saved", outdated: true), remote: .trio))
+    }
+
+    @Test("refusals because the profile changed or is gone are marked outdated, other refusals are not")
+    func outdatedRefusals() {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let conflict = ProfileRemote.loop.key(.save, name: "Weekday")
+        let gone = ProfileRemote.loop.key(.activate, name: "Old")
+        let invalid = ProfileRemote.loop.key(.save, name: "School")
+        [conflict, gone, invalid].forEach { tracker.begin(key: $0) }
+        func reply(_ type: String, _ body: String) -> [AnyHashable: Any] {
+            ["command_type": type, "command_status": "failed", "aps": ["alert": ["body": body]]]
+        }
+        let conflictBody = "Command failed: Profile 'Weekday' not saved: The profile changed on the phone after it was uploaded. Review it again and resend."
+        #expect(tracker.handleNotification(userInfo: reply("profile_save", conflictBody)))
+        #expect(tracker.states[conflict] == .done(success: false, message: conflictBody, outdated: true))
+        #expect(tracker.handleNotification(userInfo: reply("profile_switch", "Profile 'Old' not activated: No profile named Old")))
+        #expect(tracker.states[gone] == .done(success: false, message: "Profile 'Old' not activated: No profile named Old", outdated: true))
+        #expect(tracker.handleNotification(userInfo: reply("profile_save", "Profile 'School' not saved: The correction range is below the glucose safety limit")))
+        #expect(tracker.states[invalid] == .done(success: false, message: "Profile 'School' not saved: The correction range is below the glucose safety limit"))
+
+        let trioKey = ProfileRemote.trio.key(.save, name: "Weekend")
+        tracker.begin(key: trioKey)
+        tracker.trioAcks.register(commandID: "T1", key: trioKey)
+        #expect(tracker.handleNotification(userInfo: ["command_status": "failed", "command_id": "T1", "result": "conflict"]))
+        if case let .done(_, _, outdated) = tracker.states[trioKey] { #expect(outdated) } else { Issue.record("not resolved") }
+        let trioRejected = ProfileRemote.trio.key(.save, name: "Rejected")
+        tracker.begin(key: trioRejected)
+        tracker.trioAcks.register(commandID: "T2", key: trioRejected)
+        #expect(tracker.handleNotification(userInfo: ["command_status": "failed", "command_id": "T2", "result": "rejected"]))
+        if case let .done(_, _, outdated) = tracker.states[trioRejected] { #expect(!outdated) } else { Issue.record("not resolved") }
+        #expect(ProfileCommandFlow.resultMessage(.init(success: false, message: "x", outdated: true), remote: .trio).contains("loading the profiles"))
     }
 
     @Test("Trio profile acks match the command id and fall back to a profile message")

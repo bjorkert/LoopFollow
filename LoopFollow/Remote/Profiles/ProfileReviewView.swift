@@ -46,12 +46,12 @@ struct ProfileReviewView: View {
 
     private enum AlertType: Identifiable {
         case confirm
-        case result(success: Bool, message: String)
+        case result(ProfileCommandResult)
 
         var id: String {
             switch self {
             case .confirm: return "confirm"
-            case let .result(success, message): return "result-\(success)-\(message)"
+            case let .result(result): return "result-\(result.success)-\(result.message)"
             }
         }
     }
@@ -175,8 +175,8 @@ struct ProfileReviewView: View {
             pushSize = Self.computePushSize(command, remote: remote)
             pushSizeComputed = true
         }
-        .onProfileCommandResult(keys: [key]) { _, success, message in
-            alert = .result(success: success, message: message)
+        .onProfileCommandResult(keys: [key], command: command) { _, result in
+            alert = .result(result)
         }
         .alert(item: $alert) { type in
             switch type {
@@ -187,12 +187,12 @@ struct ProfileReviewView: View {
                     primaryButton: isActive ? .destructive(Text("Send"), action: send) : .default(Text("Send"), action: send),
                     secondaryButton: .cancel()
                 )
-            case let .result(success, message):
+            case let .result(result):
                 return Alert(
-                    title: Text(ProfileCommandFlow.resultTitle(kind: .save, success: success, message: message, remote: remote)),
-                    message: Text(message),
+                    title: Text(ProfileCommandFlow.resultTitle(kind: .save, success: result.success, message: result.message, remote: remote)),
+                    message: Text(ProfileCommandFlow.resultMessage(result, remote: remote)),
                     dismissButton: .default(Text("OK")) {
-                        if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) { onFinished() }
+                        if ProfileCommandFlow.leavesAfterResult(result, remote: remote) { onFinished() }
                     }
                 )
             }
@@ -285,7 +285,7 @@ struct ProfileReviewView: View {
     private func authenticateAndSend() {
         ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change \(command.targetName) in \(remote.appName).") { message in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                alert = .result(success: false, message: message)
+                alert = .result(ProfileCommandResult(success: false, message: message))
             }
         }
     }

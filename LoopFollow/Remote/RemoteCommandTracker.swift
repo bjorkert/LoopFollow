@@ -16,16 +16,20 @@ final class RemoteCommandTracker: ObservableObject {
 
     enum State: Equatable {
         case pending(since: Date)
-        case done(success: Bool, message: String)
+        /// `outdated` marks a refusal because the target changed or no longer exists on the phone.
+        case done(success: Bool, message: String, outdated: Bool = false)
     }
 
     struct Resolution: Equatable {
         let key: String
         let success: Bool
         let message: String
+        var outdated = false
     }
 
     @Published private(set) var states: [String: State] = [:]
+    /// The last profile command sent under each key.
+    private(set) var profileCommands: [String: ProfileCommand] = [:]
 
     let trioAcks = TRCMealAckAdapter()
     private let timeout: TimeInterval
@@ -64,13 +68,14 @@ final class RemoteCommandTracker: ObservableObject {
         }
     }
 
-    func resolve(key: String, success: Bool, message: String) {
+    func resolve(key: String, success: Bool, message: String, outdated: Bool = false) {
         onMain {
             guard case .pending = self.states[key] else { return }
             self.timeouts[key]?.cancel()
             self.timeouts[key] = nil
-            self.states[key] = .done(success: success, message: message)
-            LogManager.shared.log(category: .apns, message: "Remote command for \(LogRedactor.tail(key)) finished: success=\(success) \(message)")
+            self.states[key] = .done(success: success, message: message, outdated: outdated)
+            let outcome = ProfileRemote.isProfileCommandKey(key) ? "outdated=\(outdated)" : message
+            LogManager.shared.log(category: .apns, message: "Remote command for \(Self.logKey(key)) finished: success=\(success) \(outcome)")
             NotificationCenter.default.post(name: .remoteMealCommandDidComplete, object: nil, userInfo: ["key": key, "success": success])
         }
     }
@@ -107,7 +112,7 @@ final class RemoteCommandTracker: ObservableObject {
             LogManager.shared.log(category: .apns, message: "Ack for \(Self.logKey(resolution.key)) matched no pending command")
             return false
         }
-        resolve(key: resolution.key, success: resolution.success, message: resolution.message)
+        resolve(key: resolution.key, success: resolution.success, message: resolution.message, outdated: resolution.outdated)
         return true
     }
 
@@ -148,7 +153,8 @@ final class TRCMealAckAdapter {
         return RemoteCommandTracker.Resolution(
             key: entry.key,
             success: success,
-            message: alertBody(userInfo) ?? registered ?? Self.defaultMessage(result: result, success: success)
+            message: alertBody(userInfo) ?? registered ?? Self.defaultMessage(result: result, success: success),
+            outdated: !success && ProfileRemote.isProfileCommandKey(entry.key) && (result == "conflict" || result == "not_found")
         )
     }
 
@@ -205,7 +211,24 @@ enum LoopProfileAckAdapter {
         let pendingNames = pendingKeys.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
         guard let name = profileName(in: body, kind: kind, candidates: pendingNames) else { return nil }
         LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
-        return RemoteCommandTracker.Resolution(key: ProfileRemote.loop.key(kind, name: name), success: status == "success", message: body)
+        let success = status == "success"
+        return RemoteCommandTracker.Resolution(
+            key: ProfileRemote.loop.key(kind, name: name),
+            success: success,
+            message: body,
+            outdated: !success && isOutdatedRefusal(body)
+        )
+    }
+
+    /// Loop's reasons (English) for refusing a command whose profile changed or no longer exists on the phone.
+    static let outdatedReasons = [
+        "changed on the phone after it was uploaded",
+        "has changed since it was loaded",
+        "No profile named",
+    ]
+
+    static func isOutdatedRefusal(_ message: String) -> Bool {
+        outdatedReasons.contains { message.localizedCaseInsensitiveContains($0) }
     }
 
     static func verb(_ kind: ProfileCommandKind) -> String {
@@ -337,6 +360,7 @@ extension RemoteCommandTracker {
     func sendProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote, completion sent: @escaping (Bool, String?) -> Void) {
         let key = remote.key(for: command)
         let completion = RemoteCommandRefresh.following(.profile(command), sent)
+        onMain { self.profileCommands[key] = command }
         begin(key: key, timeout: ProfileRemote.timeout, timeoutMessage: remote.timeoutMessage)
         switch remote {
         case .loop:
