@@ -209,18 +209,38 @@ enum LoopProfileAckAdapter {
         else { return nil }
         let prefix = ProfileRemote.loop.keyPrefix(kind)
         let pendingNames = pendingKeys.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
-        guard let name = profileName(in: body, kind: kind, candidates: pendingNames) else { return nil }
-        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
-        let success = status == "success"
+        // Loop builds the "Profile '<n>' …" frame of the body in English and localizes only the reason. A body
+        // without any such frame resolves the only pending command of its type.
+        let framed = ProfileCommandKind.allCases.contains { profileName(in: body, kind: $0) != nil }
+        let named = profileName(in: body, kind: kind, candidates: pendingNames)
+        guard let name = named ?? (!framed && pendingNames.count == 1 ? pendingNames[0] : nil) else { return nil }
+        let result = userInfo["result"] as? String
+        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status) result=\(result ?? "-")")
+        let outcome = outcome(status: status, result: result, body: body)
         return RemoteCommandTracker.Resolution(
             key: ProfileRemote.loop.key(kind, name: name),
-            success: success,
+            success: outcome.success,
             message: body,
-            outdated: !success && isOutdatedRefusal(body)
+            outdated: outcome.outdated
         )
     }
 
-    /// Loop's reasons (English) for refusing a command whose profile changed or no longer exists on the phone.
+    static let successResults: Set<String> = ["activated", "saved", "deleted"]
+    static let outdatedResults: Set<String> = ["conflict", "not_found"]
+
+    /// Success and outdated from the reply's `result` code; replies without one (older Loop builds) fall back to
+    /// `command_status` and the English reason in the alert text.
+    static func outcome(status: String, result: String?, body: String) -> (success: Bool, outdated: Bool) {
+        if let result, !result.isEmpty {
+            let success = successResults.contains(result)
+            return (success, !success && outdatedResults.contains(result))
+        }
+        let success = status == "success"
+        return (success, !success && isOutdatedRefusal(body))
+    }
+
+    /// Loop's reasons (English) for refusing a command whose profile changed or no longer exists on the phone,
+    /// for replies without a `result` code.
     static let outdatedReasons = [
         "changed on the phone after it was uploaded",
         "has changed since it was loaded",
@@ -270,13 +290,23 @@ enum LoopScheduledSwitchesAckAdapter {
         guard userInfo["command_type"] as? String == commandType,
               let status = userInfo["command_status"] as? String
         else { return nil }
-        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
-        let success = status == "success"
+        let result = userInfo["result"] as? String
+        LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status) result=\(result ?? "-")")
+        let success: Bool
+        let outdated: Bool
+        if let result, !result.isEmpty {
+            success = result == "saved"
+            outdated = !success && (result == "conflict" || result == "not_found")
+        } else {
+            success = status == "success"
+            outdated = false
+        }
         let fallback = success ? "Scheduled switches saved" : "Scheduled switches not saved"
         return RemoteCommandTracker.Resolution(
             key: ProfileRemote.loop.key(.saveScheduledSwitches, name: ProfileCommand.scheduledSwitchesTarget),
             success: success,
-            message: alertBody(userInfo) ?? fallback
+            message: alertBody(userInfo) ?? fallback,
+            outdated: outdated
         )
     }
 }

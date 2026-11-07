@@ -106,6 +106,29 @@ struct RemoteCommandTrackerTests {
         #expect(LoopProfileAckAdapter.resolution(for: ["command_type": "carbs_edit", "command_status": "success"]) == nil)
     }
 
+    @Test("a Loop profile reply without the English frame resolves only the sole pending command of its type")
+    func loopProfileReplyWithoutFrame() {
+        let localized: [AnyHashable: Any] = [
+            "command_type": "profile_switch",
+            "command_status": "success",
+            "result": "activated",
+            "aps": ["alert": ["body": "Profil 'Sport' aktiverad"]],
+        ]
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let sport = ProfileRemote.loop.key(.activate, name: "Sport")
+        let save = ProfileRemote.loop.key(.save, name: "Work")
+        tracker.begin(key: sport)
+        tracker.begin(key: save)
+        #expect(tracker.handleNotification(userInfo: localized) == true)
+        #expect(tracker.states[sport] == .done(success: true, message: "Profil 'Sport' aktiverad"))
+        #expect(tracker.isBusy(key: save))
+
+        let two = RemoteCommandTracker(timeout: 60)
+        two.begin(key: ProfileRemote.loop.key(.activate, name: "Sport"))
+        two.begin(key: ProfileRemote.loop.key(.activate, name: "Work"))
+        #expect(two.handleNotification(userInfo: localized) == false)
+    }
+
     @Test("Loop profile save and delete acks resolve by command type and name, renames by the new name")
     func loopProfileSaveDelete() {
         let tracker = RemoteCommandTracker(timeout: 60)
@@ -185,6 +208,42 @@ struct RemoteCommandTrackerTests {
         #expect(!ProfileCommandFlow.leavesAfterResult(.init(success: false, message: "Command failed: Profile 'Weekday' not saved: The basal rate 3.5 U/hr is above the maximum basal rate"), remote: .loop))
         #expect(!ProfileCommandFlow.leavesAfterResult(.init(success: false, message: ProfileRemote.trio.timeoutMessage), remote: .loop))
         #expect(ProfileCommandFlow.leavesAfterResult(.init(success: false, message: "Profile 'Weekday' not saved", outdated: true), remote: .trio))
+    }
+
+    @Test("Loop replies are classified by their result code before the alert text")
+    func loopResultCodes() {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        func reply(_ type: String, status: String, result: String?, body: String) -> [AnyHashable: Any] {
+            var info: [AnyHashable: Any] = ["command_type": type, "command_status": status, "aps": ["alert": ["body": body]]]
+            if let result { info["result"] = result }
+            return info
+        }
+        // Localized text: only the code tells it is a conflict.
+        let conflict = ProfileRemote.loop.key(.save, name: "Weekday")
+        tracker.begin(key: conflict)
+        #expect(tracker.handleNotification(userInfo: reply("profile_save", status: "failed", result: "conflict", body: "Profile 'Weekday' not saved: Profilen har ändrats")))
+        #expect(tracker.states[conflict] == .done(success: false, message: "Profile 'Weekday' not saved: Profilen har ändrats", outdated: true))
+
+        let gone = ProfileRemote.loop.key(.delete, name: "Old")
+        tracker.begin(key: gone)
+        #expect(tracker.handleNotification(userInfo: reply("profile_delete", status: "failed", result: "not_found", body: "Profile 'Old' not deleted: x")))
+        #expect(tracker.states[gone] == .done(success: false, message: "Profile 'Old' not deleted: x", outdated: true))
+
+        // A rejection whose text happens to match the English fallback stays a plain refusal.
+        let rejected = ProfileRemote.loop.key(.save, name: "School")
+        tracker.begin(key: rejected)
+        let rejectedBody = "Profile 'School' not saved: No profile named School was expected"
+        #expect(tracker.handleNotification(userInfo: reply("profile_save", status: "failed", result: "rejected", body: rejectedBody)))
+        #expect(tracker.states[rejected] == .done(success: false, message: rejectedBody))
+
+        let activated = ProfileRemote.loop.key(.activate, name: "Sport")
+        tracker.begin(key: activated)
+        #expect(tracker.handleNotification(userInfo: reply("profile_switch", status: "success", result: "activated", body: "Profile 'Sport' activated")))
+        #expect(tracker.states[activated] == .done(success: true, message: "Profile 'Sport' activated"))
+
+        #expect(LoopProfileAckAdapter.outcome(status: "success", result: "saved", body: "") == (true, false))
+        #expect(LoopProfileAckAdapter.outcome(status: "failed", result: nil, body: "The profile changed on the phone after it was uploaded.") == (false, true))
+        #expect(LoopProfileAckAdapter.outcome(status: "failed", result: nil, body: "Profilen har ändrats") == (false, false))
     }
 
     @Test("refusals because the profile changed or is gone are marked outdated, other refusals are not")

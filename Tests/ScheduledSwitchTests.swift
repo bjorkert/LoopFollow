@@ -386,20 +386,24 @@ struct ScheduledSwitchTests {
         return userInfo
     }
 
-    @Test("Loop replies resolve the pending scheduled switches command by their status")
+    @Test("Loop replies resolve the pending scheduled switches command by their result code")
     func loopReplies() {
         let key = ProfileRemote.loop.key(for: .saveScheduledSwitches([], baseFingerprint: "x"))
         #expect(key == "loop-profile-scheduled-switches-save:scheduled-switches")
         #expect(ProfileRemote.isProfileCommandKey(key))
-        let cases: [(String, String, Bool)] = [
-            ("success", "Scheduled switches saved", true),
-            ("failed", "Scheduled switches not saved: There can be at most 14 scheduled switches.", false),
+        let cases: [(String, String?, String, Bool, Bool)] = [
+            ("success", "saved", "Scheduled switches saved", true, false),
+            ("failed", "conflict", "Scheduled switches not saved: The scheduled switches changed on the phone.", false, true),
+            ("failed", "not_found", "Scheduled switches not saved: No profile named Holiday.", false, true),
+            ("failed", "rejected", "Scheduled switches not saved: There can be at most 14 scheduled switches.", false, false),
+            ("success", nil, "Scheduled switches saved", true, false),
+            ("failed", nil, "Scheduled switches not saved: expired", false, false),
         ]
-        for (status, body, success) in cases {
+        for (status, result, body, success, outdated) in cases {
             let tracker = RemoteCommandTracker(timeout: 60)
             tracker.begin(key: key)
-            #expect(tracker.handleNotification(userInfo: Self.loopReply(status: status, result: nil, body: body)))
-            #expect(tracker.states[key] == .done(success: success, message: body))
+            #expect(tracker.handleNotification(userInfo: Self.loopReply(status: status, result: result, body: body)))
+            #expect(tracker.states[key] == .done(success: success, message: body, outdated: outdated))
         }
         // A profile save reply does not resolve it.
         let tracker = RemoteCommandTracker(timeout: 60)
