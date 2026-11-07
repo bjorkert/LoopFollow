@@ -69,7 +69,7 @@ struct TherapyProfilesView: View {
             } else {
                 Text(remote == .loop
                     ? "No saved profiles found. Profiles are saved in Loop under Settings → Profiles."
-                    : "No profiles found. Profiles are saved in Trio under Settings → Therapy → Profiles.")
+                    : "No profiles found. Profiles are saved in Trio under Settings → Therapy Settings → Therapy Profiles.")
                     .foregroundColor(.secondary)
                     .italic()
             }
