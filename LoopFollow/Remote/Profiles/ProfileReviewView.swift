@@ -38,6 +38,11 @@ struct ProfileReviewView: View {
     @ObservedObject private var tracker = RemoteCommandTracker.shared
     @State private var alert: AlertType?
     @State private var showJSON = false
+    /// The serialized push size, computed once per command; nil when it can not be computed.
+    @State private var pushSize: Int?
+    @State private var pushSizeComputed = false
+    /// True while the newest profile document is loaded before a send.
+    @State private var checking = false
 
     private enum AlertType: Identifiable {
         case confirm
@@ -71,10 +76,10 @@ struct ProfileReviewView: View {
 
     private var problems: [String] {
         guard let limits else { return ["Profiles can not be changed without the limits from \(remote.appName)."] }
-        return ProfileValidation.problems(values, limits: limits)
+        return ProfileValidation.problems(for: command, limits: limits)
     }
 
-    private var pushSize: Int? {
+    private static func computePushSize(_ command: ProfileCommand, remote: ProfileRemote) -> Int? {
         guard case let .save(name, original, values) = command else { return nil }
         switch remote {
         case .loop:
@@ -89,11 +94,10 @@ struct ProfileReviewView: View {
     }
 
     private var canSend: Bool {
-        problems.isEmpty && !isTooLarge && !isSending && !otherPending
+        pushSizeComputed && problems.isEmpty && !isTooLarge && !isSending && !otherPending && !checking
     }
 
     var body: some View {
-        let size = pushSize
         List {
             Section {
                 Text(summary)
@@ -106,7 +110,7 @@ struct ProfileReviewView: View {
                 diffSection(kind)
             }
 
-            Section(header: Text("Sent to \(remote.appName)"), footer: sizeFooter(size)) {
+            Section(header: Text("Sent to \(remote.appName)"), footer: sizeFooter(pushSize)) {
                 LabeledValueRow(label: "Name", value: command.targetName)
                 if let original {
                     if original.name != command.targetName {
@@ -144,6 +148,11 @@ struct ProfileReviewView: View {
                             ProgressView().scaleEffect(0.8)
                             Text("Waiting for \(remote.appName)...")
                         }
+                    } else if checking {
+                        HStack {
+                            ProgressView().scaleEffect(0.8)
+                            Text("Checking the profile...")
+                        }
                     } else if otherPending {
                         Text("Another Profile Command Is Pending")
                     } else {
@@ -162,6 +171,10 @@ struct ProfileReviewView: View {
         }
         .navigationTitle("Review")
         .navigationBarTitleDisplayMode(.inline)
+        .task(id: command) {
+            pushSize = Self.computePushSize(command, remote: remote)
+            pushSizeComputed = true
+        }
         .onProfileCommandResult(keys: [key]) { _, success, message in
             alert = .result(success: success, message: message)
         }
@@ -179,7 +192,7 @@ struct ProfileReviewView: View {
                     title: Text(ProfileCommandFlow.resultTitle(kind: .save, success: success, message: message, remote: remote)),
                     message: Text(message),
                     dismissButton: .default(Text("OK")) {
-                        if success { onFinished() }
+                        if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) { onFinished() }
                     }
                 )
             }
@@ -240,6 +253,7 @@ struct ProfileReviewView: View {
     }
 
     private func sizeFooter(_ size: Int?) -> Text {
+        guard pushSizeComputed else { return Text("") }
         guard let size else {
             return Text("The size of the command can not be computed until LoopFollow's own APNS credentials are set up in App Settings → APN.")
         }
@@ -249,7 +263,26 @@ struct ProfileReviewView: View {
         return Text("Command size: about \(size) of \(APNSDelivery.maxPayloadBytes) bytes.")
     }
 
+    /// Checks against the newest profile document that the profile is unchanged and has the active state the review
+    /// showed, then sends after device authentication.
     private func send() {
+        guard let original else {
+            authenticateAndSend()
+            return
+        }
+        checking = true
+        ProfileCommandFlow.fetchProfileSet { current in
+            checking = false
+            guard let reason = ProfileCommandFlow.saveStaleReason(original: original, reviewedActive: isActive, current: current, remote: remote) else {
+                authenticateAndSend()
+                return
+            }
+            if let current { Observable.shared.therapyProfiles.set(current) }
+            alert = .result(ProfileCommandResult(success: false, message: reason, outdated: current != nil))
+        }
+    }
+
+    private func authenticateAndSend() {
         ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change \(command.targetName) in \(remote.appName).") { message in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                 alert = .result(success: false, message: message)

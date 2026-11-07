@@ -90,14 +90,14 @@ struct ProfileValuesEditor: View {
 
             if let limits {
                 Button {
-                    let added = ProfileSegmentGrid.addSegment(to: segments, segmentSeconds: limits.segmentSeconds, maxSegments: limits.segmentLimit)
+                    let added = ProfileSegmentGrid.addSegment(to: segments, segmentSeconds: limits.segmentSeconds, maxSegments: limits.segmentLimit(for: kind))
                     let newSegment = added.first { segment in !segments.contains { $0.id == segment.id } }
                     segments = added
                     expandedID = newSegment?.id
                 } label: {
                     Label("Add Time", systemImage: "plus.circle")
                 }
-                .disabled(ProfileSegmentGrid.newSegmentStart(segments, segmentSeconds: limits.segmentSeconds, maxSegments: limits.segmentLimit) == nil)
+                .disabled(ProfileSegmentGrid.newSegmentStart(segments, segmentSeconds: limits.segmentSeconds, maxSegments: limits.segmentLimit(for: kind)) == nil)
             }
         }
     }
@@ -238,7 +238,7 @@ struct ProfileValuesEditor: View {
             }
             if let limits {
                 Text(limits.boundsText(for: kind))
-                Text("\(segments.count) of \(limits.segmentLimit) times. Tap a row to change it, swipe left to remove it.")
+                Text("\(segments.count) of \(limits.segmentLimit(for: kind)) times. Tap a row to change it, swipe left to remove it.")
             }
         }
     }

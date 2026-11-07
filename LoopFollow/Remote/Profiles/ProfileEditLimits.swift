@@ -61,6 +61,8 @@ struct ProfileEditLimits: Decodable, Equatable {
     let sensitivity: Range
     let target: Range
     let maxSegments: Int
+    /// The pump's basal schedule entry limit, when the app publishes one.
+    let maxBasalSegments: Int?
     let segmentSeconds: Int
 
     /// Basal rates the editor offers: the supported rates up to max basal, from `basalMinimum` when set.
@@ -79,9 +81,15 @@ struct ProfileEditLimits: Decodable, Equatable {
         min(maxSegments, 86400 / segmentSeconds)
     }
 
+    /// The most segments a schedule of `kind` may have; basal also stays within the pump's entry limit.
+    func segmentLimit(for kind: ProfileScheduleKind) -> Int {
+        guard kind == .basal, let maxBasalSegments else { return segmentLimit }
+        return min(segmentLimit, maxBasalSegments)
+    }
+
     /// False when the published limits are inconsistent; the editor is then disabled.
     var isUsable: Bool {
-        segmentSeconds > 0 && 86400 % segmentSeconds == 0 && maxSegments > 0
+        segmentSeconds > 0 && 86400 % segmentSeconds == 0 && maxSegments > 0 && (maxBasalSegments ?? 1) > 0
             && !allowedBasalRates.isEmpty
             && carbRatio.isUsable && sensitivity.isUsable && target.isUsable
     }

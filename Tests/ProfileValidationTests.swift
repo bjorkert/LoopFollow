@@ -83,6 +83,40 @@ struct ProfileValidationTests {
         #expect(ProfileValidation.problems(values(basal: base.basal, carbRatio: [(0, 3)], target: [(0, 90, 120)]), limits: limits).isEmpty)
     }
 
+    @Test("basal schedules stay within the pump's entry limit")
+    func basalSegmentLimit() throws {
+        let limits = try ProfileEditLimitsTests.limits(ProfileEditLimitsTests.contractLimitsJSON.replacingOccurrences(of: "\"maxSegments\": 48", with: "\"maxSegments\": 48, \"maxBasalSegments\": 24"))
+        let starts25 = Array(stride(from: 0, to: 25 * 1800, by: 1800))
+        #expect(ProfileValidation.scheduleProblems(starts25, kind: .basal, limits: limits) == ["Basal Rates: at most 24 times are allowed."])
+        #expect(ProfileValidation.scheduleProblems(Array(starts25.dropLast()), kind: .basal, limits: limits).isEmpty)
+        #expect(ProfileValidation.scheduleProblems(starts25, kind: .carbRatio, limits: limits).isEmpty)
+        let basal = starts25.map { ($0, 0.1) }
+        #expect(ProfileValidation.problems(values(basal: basal), limits: limits).count == 1)
+    }
+
+    @Test("a pure rename is not checked against today's limits, a changed save is")
+    func renameSkipsValueChecks() throws {
+        let limits = try ProfileEditLimitsTests.limits()
+        let json = """
+        {"timezone": "UTC", "units": "mg/dL",
+         "basal": [{"time": "00:00", "value": 0.12, "timeAsSeconds": 0}],
+         "carbratio": [{"time": "00:00", "value": 10, "timeAsSeconds": 0}],
+         "sens": [{"time": "00:00", "value": 50, "timeAsSeconds": 0}],
+         "target_low": [{"time": "00:00", "value": 80, "timeAsSeconds": 0}],
+         "target_high": [{"time": "00:00", "value": 110, "timeAsSeconds": 0}]}
+        """
+        let store = try JSONDecoder().decode(NSProfile.Store.self, from: Data(json.utf8))
+        let stored = TherapyProfile(name: "Old Sport", store: store)
+        #expect(ProfileValidation.problems(stored.values, limits: limits).count == 2)
+        #expect(ProfileValidation.problems(for: .save(name: "Sport", original: stored, values: stored.values), limits: limits).isEmpty)
+
+        var draft = ProfileDraft(stored.values)
+        draft.carbRatio[0].value = 12
+        #expect(ProfileValidation.problems(for: .save(name: "Old Sport", original: stored, values: draft.values), limits: limits).count == 2)
+        #expect(ProfileValidation.problems(for: .save(name: "Copy", original: nil, values: stored.values), limits: limits).count == 2)
+        #expect(ProfileValidation.problems(for: .activate(stored), limits: limits).isEmpty)
+    }
+
     @Test("new segments go one step after the last, or into the first free slot")
     func addSegments() {
         var segments = [EditableSegment(seconds: 0, value: 1), EditableSegment(seconds: 21600, value: 2)]

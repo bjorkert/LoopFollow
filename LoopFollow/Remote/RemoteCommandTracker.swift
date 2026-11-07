@@ -4,7 +4,7 @@
 import Foundation
 
 extension Notification.Name {
-    /// Posted when a tracked remote command reaches a terminal state, with its key in `userInfo["key"]`, so lists can refresh.
+    /// Posted when a tracked remote command reaches a terminal state, with its key in `userInfo["key"]` and its outcome in `userInfo["success"]`, so lists can refresh.
     static let remoteMealCommandDidComplete = Notification.Name("LoopFollow.remoteMealCommandDidComplete")
 }
 
@@ -71,7 +71,7 @@ final class RemoteCommandTracker: ObservableObject {
             self.timeouts[key] = nil
             self.states[key] = .done(success: success, message: message)
             LogManager.shared.log(category: .apns, message: "Remote command for \(LogRedactor.tail(key)) finished: success=\(success) \(message)")
-            NotificationCenter.default.post(name: .remoteMealCommandDidComplete, object: nil, userInfo: ["key": key])
+            NotificationCenter.default.post(name: .remoteMealCommandDidComplete, object: nil, userInfo: ["key": key, "success": success])
         }
     }
 
@@ -88,12 +88,19 @@ final class RemoteCommandTracker: ObservableObject {
         }
     }
 
+    private var pendingKeys: [String] {
+        states.compactMap { key, state in
+            if case .pending = state { return key }
+            return nil
+        }
+    }
+
     /// Returns true when the push resolved a pending command.
     @discardableResult
     func handleNotification(userInfo: [AnyHashable: Any]) -> Bool {
         guard let resolution = trioAcks.resolution(for: userInfo)
             ?? LoopCarbAckAdapter.resolution(for: userInfo)
-            ?? LoopProfileAckAdapter.resolution(for: userInfo)
+            ?? LoopProfileAckAdapter.resolution(for: userInfo, pendingKeys: pendingKeys)
             ?? LoopScheduledSwitchesAckAdapter.resolution(for: userInfo)
         else { return false }
         guard isBusy(key: resolution.key) else {
@@ -180,6 +187,7 @@ enum LoopCarbAckAdapter {
 
 /// Matches Loop's return push for a profile command by the profile name in its message
 /// ("Profile '<name>' activated|saved|deleted" or "... Profile '<name>' not activated|saved|deleted: <reason>").
+/// Names may contain apostrophes, so a name of a pending command that fits the message is preferred over parsing.
 enum LoopProfileAckAdapter {
     static let commandTypes: [String: ProfileCommandKind] = [
         "profile_switch": .activate,
@@ -187,26 +195,47 @@ enum LoopProfileAckAdapter {
         "profile_delete": .delete,
     ]
 
-    static func resolution(for userInfo: [AnyHashable: Any]) -> RemoteCommandTracker.Resolution? {
+    static func resolution(for userInfo: [AnyHashable: Any], pendingKeys: [String] = []) -> RemoteCommandTracker.Resolution? {
         guard let commandType = userInfo["command_type"] as? String,
               let kind = commandTypes[commandType],
               let status = userInfo["command_status"] as? String,
-              let body = alertBody(userInfo),
-              let name = profileName(in: body, kind: kind)
+              let body = alertBody(userInfo)
         else { return nil }
+        let prefix = ProfileRemote.loop.keyPrefix(kind)
+        let pendingNames = pendingKeys.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+        guard let name = profileName(in: body, kind: kind, candidates: pendingNames) else { return nil }
         LogManager.shared.log(category: .apns, message: "Loop ack: type=\(commandType) status=\(status)")
         return RemoteCommandTracker.Resolution(key: ProfileRemote.loop.key(kind, name: name), success: status == "success", message: body)
     }
 
-    static func profileName(in message: String, kind: ProfileCommandKind) -> String? {
-        let match: Substring?
+    static func verb(_ kind: ProfileCommandKind) -> String {
         switch kind {
-        case .activate: match = message.firstMatch(of: /Profile '(.+)' (?:not )?activated/)?.1
-        case .save: match = message.firstMatch(of: /Profile '(.+)' (?:not )?saved/)?.1
-        case .delete: match = message.firstMatch(of: /Profile '(.+)' (?:not )?deleted/)?.1
-        case .saveScheduledSwitches: match = nil
+        case .activate: return "activated"
+        case .save: return "saved"
+        case .delete: return "deleted"
+        case .saveScheduledSwitches: return "saved"
         }
-        return match.map(String.init)
+    }
+
+    /// The profile named in `message`: the longest candidate the message names, otherwise the name parsed up to
+    /// the first "' not <verb>: " or up to a final "' <verb>".
+    static func profileName(in message: String, kind: ProfileCommandKind, candidates: [String] = []) -> String? {
+        guard kind != .saveScheduledSwitches else { return nil }
+        let verb = verb(kind)
+        let named = candidates
+            .filter { name in
+                message.hasSuffix("Profile '\(name)' \(verb)") || message.contains("Profile '\(name)' not \(verb): ")
+            }
+            .max { $0.count < $1.count }
+        if let named { return named }
+        let pattern: Regex<(Substring, Substring)>
+        switch kind {
+        case .activate: pattern = /Profile '(.+?)'(?: not activated: | activated$)/
+        case .save: pattern = /Profile '(.+?)'(?: not saved: | saved$)/
+        case .delete: pattern = /Profile '(.+?)'(?: not deleted: | deleted$)/
+        case .saveScheduledSwitches: return nil
+        }
+        return message.firstMatch(of: pattern).map { String($0.1) }
     }
 }
 
@@ -305,8 +334,9 @@ extension RemoteCommandTracker {
     }
 
     /// Sends a profile command and tracks it under `ProfileRemote.key(for:)` until the reply or the timeout.
-    func sendProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote, completion: @escaping (Bool, String?) -> Void) {
+    func sendProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote, completion sent: @escaping (Bool, String?) -> Void) {
         let key = remote.key(for: command)
+        let completion = RemoteCommandRefresh.following(.profile(command), sent)
         begin(key: key, timeout: ProfileRemote.timeout, timeoutMessage: remote.timeoutMessage)
         switch remote {
         case .loop:

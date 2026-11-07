@@ -154,6 +154,15 @@ enum ProfileValidation {
         return problems
     }
 
+    /// Everything that keeps `command` from being sent within `limits`. A save that keeps the values of the
+    /// profile it updates (a pure rename) is not checked against the limits, which may have changed since the
+    /// values were stored.
+    static func problems(for command: ProfileCommand, limits: ProfileEditLimits) -> [String] {
+        guard case let .save(_, original, values) = command else { return [] }
+        if let original, original.values == values { return [] }
+        return problems(values, limits: limits)
+    }
+
     static func scheduleProblems(_ starts: [Int], kind: ProfileScheduleKind, limits: ProfileEditLimits) -> [String] {
         guard let first = starts.first else { return ["\(kind.title): add at least one time."] }
         var problems: [String] = []
@@ -164,8 +173,9 @@ enum ProfileValidation {
         if starts.contains(where: { $0 < 0 || $0 >= 86400 || $0 % limits.segmentSeconds != 0 }) {
             problems.append("\(kind.title): times must be on the \(limits.segmentSeconds / 60)-minute grid.")
         }
-        if starts.count > limits.segmentLimit {
-            problems.append("\(kind.title): at most \(limits.segmentLimit) times are allowed.")
+        let segmentLimit = limits.segmentLimit(for: kind)
+        if starts.count > segmentLimit {
+            problems.append("\(kind.title): at most \(segmentLimit) times are allowed.")
         }
         return problems
     }

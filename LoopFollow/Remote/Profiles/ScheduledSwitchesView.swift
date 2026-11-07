@@ -307,6 +307,7 @@ struct ScheduledSwitchesReviewView: View {
     @State private var showJSON = false
     @State private var pushSize: Int?
     @State private var pushSizeComputed = false
+    @State private var checking = false
 
     private enum AlertType: Identifiable {
         case confirm
@@ -336,7 +337,7 @@ struct ScheduledSwitchesReviewView: View {
     private var isTooLarge: Bool { (pushSize ?? 0) > ProfilePushSize.reviewLimit(for: remote) }
 
     private var canSend: Bool {
-        pushSizeComputed && problems.isEmpty && !isTooLarge && !isSending && !otherPending
+        pushSizeComputed && problems.isEmpty && !isTooLarge && !isSending && !otherPending && !checking
     }
 
     var body: some View {
@@ -393,6 +394,11 @@ struct ScheduledSwitchesReviewView: View {
                             ProgressView().scaleEffect(0.8)
                             Text("Waiting for \(remote.appName)...")
                         }
+                    } else if checking {
+                        HStack {
+                            ProgressView().scaleEffect(0.8)
+                            Text("Checking the scheduled switches...")
+                        }
                     } else if otherPending {
                         Text("Another Profile Command Is Pending")
                     } else {
@@ -431,7 +437,7 @@ struct ScheduledSwitchesReviewView: View {
                     title: Text(ProfileCommandFlow.resultTitle(kind: .saveScheduledSwitches, success: success, message: message, remote: remote)),
                     message: Text(message),
                     dismissButton: .default(Text("OK")) {
-                        if success { onFinished() }
+                        if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) { onFinished() }
                     }
                 )
             }
@@ -458,10 +464,35 @@ struct ScheduledSwitchesReviewView: View {
         }
     }
 
+    /// Why the reviewed list must not be sent now that `current` is the newest profile document, or nil.
+    static func staleReason(baseFingerprint: String, entries: [ScheduledProfileSwitch], current: TherapyProfileSet?, remote: ProfileRemote) -> String? {
+        guard let current else {
+            return "LoopFollow could not load the scheduled switches from Nightscout to check that they are unchanged, so nothing was sent. Try again."
+        }
+        if current.scheduledSwitches.fingerprint != baseFingerprint || !current.scheduledSwitches.isComplete {
+            return "The scheduled switches changed in \(remote.appName) while you were editing, so nothing was sent. Review them again."
+        }
+        let names = current.profiles.map(\.name)
+        if let missing = entries.first(where: { entry in !names.contains { $0.caseInsensitiveCompare(entry.profile) == .orderedSame } }) {
+            return "“\(missing.profile)” is no longer in the list uploaded by \(remote.appName), so nothing was sent. Review the scheduled switches again."
+        }
+        return nil
+    }
+
     private func send() {
-        ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change the scheduled switches in \(remote.appName).") { message in
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                alert = .result(success: false, message: message)
+        checking = true
+        let base = list.fingerprint
+        ProfileCommandFlow.fetchProfileSet { current in
+            checking = false
+            if let reason = Self.staleReason(baseFingerprint: base, entries: entries, current: current, remote: remote) {
+                if let current { Observable.shared.therapyProfiles.set(current) }
+                alert = .result(success: false, message: reason)
+                return
+            }
+            ProfileCommandFlow.authenticateAndSend(command, to: remote, reason: "Confirm your identity to change the scheduled switches in \(remote.appName).") { message in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    alert = .result(success: false, message: message)
+                }
             }
         }
     }

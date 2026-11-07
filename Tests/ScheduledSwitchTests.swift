@@ -440,6 +440,30 @@ struct ScheduledSwitchTests {
         )
     }
 
+    @Test("a list is not sent when the phone's list or its profiles changed since the review")
+    func staleBeforeSending() throws {
+        let reviewed = [Self.weekend, Self.school]
+        let base = ScheduledProfileSwitch.fingerprint(reviewed)
+        let new = ScheduledSwitches.togglingPause(of: Self.weekend.id, in: reviewed)
+        #expect(try ScheduledSwitchesReviewView.staleReason(baseFingerprint: base, entries: new, current: Self.profileSet(reviewed), remote: .loop) == nil)
+        let changed = try Self.profileSet([Self.weekend])
+        #expect(ScheduledSwitchesReviewView.staleReason(baseFingerprint: base, entries: new, current: changed, remote: .loop)?.contains("changed in Loop while you were editing") == true)
+        let deleted = try Self.profileSet(reviewed, profiles: ["Default"])
+        #expect(ScheduledSwitchesReviewView.staleReason(baseFingerprint: base, entries: new, current: deleted, remote: .trio)?.contains("“Weekend” is no longer") == true)
+        #expect(ScheduledSwitchesReviewView.staleReason(baseFingerprint: base, entries: new, current: nil, remote: .trio)?.contains("could not load") == true)
+    }
+
+    @Test("the follow-up fetches stop once the uploaded list is no longer the one replaced")
+    func refreshStops() throws {
+        let old = [Self.weekend, Self.school]
+        let command = ProfileCommand.saveScheduledSwitches(ScheduledSwitches.togglingPause(of: Self.weekend.id, in: old), baseFingerprint: ScheduledProfileSwitch.fingerprint(old))
+        let before = try Self.profileSet(old)
+        #expect(!RemoteCommandRefresh.profileArrived(command, before: before, now: before))
+        let after = try Self.profileSet(ScheduledSwitches.togglingPause(of: Self.weekend.id, in: old))
+        #expect(RemoteCommandRefresh.profileArrived(command, before: before, now: after))
+        #expect(!RemoteCommandRefresh.profileArrived(command, before: before, now: nil))
+    }
+
     @Test("the scheduled switches command is gated on the name each app lists")
     func gating() {
         #expect(ProfileRemote.loop.supports(.saveScheduledSwitches, in: ["profile-scheduled-switches-save"]))

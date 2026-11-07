@@ -189,15 +189,98 @@ struct TherapyProfileTests {
         #expect(ProfileEditing.blocker(for: profile, limits: limits, remote: .loop) != nil)
     }
 
+    @Test("follow-up fetches after a profile command stop once its result is in the profile document")
+    func profileCommandArrival() throws {
+        let base = try Self.store(units: "mg/dL", sens: 45, low: 100, high: 110)
+        let changed = try Self.store(units: "mg/dL", sens: 50, low: 100, high: 110)
+        let before = TherapyProfileSet(Self.document(["Default": base, "Sport": base], active: "Default"))
+        let sport = try #require(before.profile(named: "Sport"))
+        func arrived(_ command: ProfileCommand, _ now: [String: NSProfile.Store], active: String = "Default") -> Bool {
+            RemoteCommandRefresh.profileArrived(command, before: before, now: TherapyProfileSet(Self.document(now, active: active)))
+        }
+
+        #expect(!RemoteCommandRefresh.profileArrived(.activate(sport), before: before, now: nil))
+        #expect(!arrived(.activate(sport), ["Default": base, "Sport": base]))
+        #expect(arrived(.activate(sport), ["Default": base, "Sport": base], active: "sport"))
+
+        #expect(!arrived(.delete(sport), ["Default": base, "Sport": base]))
+        #expect(arrived(.delete(sport), ["Default": base]))
+
+        let edit = ProfileCommand.save(name: "Sport", original: sport, values: sport.values)
+        #expect(!arrived(edit, ["Default": base, "Sport": base]))
+        #expect(arrived(edit, ["Default": base, "Sport": changed]))
+
+        let rename = ProfileCommand.save(name: "Gym", original: sport, values: sport.values)
+        #expect(!arrived(rename, ["Default": base, "Sport": base]))
+        #expect(arrived(rename, ["Default": base, "Gym": base]))
+    }
+
     @Test("schedule start times show as the looper's wall-clock times, whatever this phone's time zone")
     func startTimesIgnoreThisPhonesTimeZone() throws {
         let starts = Array(stride(from: 0, to: 86400, by: 1800))
-        let original = NSTimeZone.default
-        defer { NSTimeZone.default = original }
-        NSTimeZone.default = try #require(TimeZone(identifier: "Europe/Stockholm"))
-        let home = starts.map(ProfileValueFormat.timeText)
-        NSTimeZone.default = try #require(TimeZone(identifier: "America/St_Johns"))
-        #expect(starts.map(ProfileValueFormat.timeText) == home)
-        #expect(Set(home).count == starts.count)
+        let utc = DateFormatter()
+        utc.timeStyle = .short
+        utc.timeZone = try #require(TimeZone(identifier: "UTC"))
+        let texts = starts.map(ProfileValueFormat.timeText)
+        #expect(texts == starts.map { utc.string(from: Date(timeIntervalSince1970: TimeInterval($0))) })
+        #expect(Set(texts).count == starts.count)
+    }
+
+    @Test("Trio profiles carry one target per time: the draft sends high equal to low")
+    func trioSingleTarget() throws {
+        let values = TherapyProfileValues(
+            units: "mg/dL",
+            basal: [ProfileScheduleItem(seconds: 0, value: 0.85)],
+            carbRatio: [ProfileScheduleItem(seconds: 0, value: 10)],
+            sensitivity: [ProfileScheduleItem(seconds: 0, value: 50)],
+            target: [ProfileRangeItem(seconds: 0, low: 100, high: 110)]
+        )
+        #expect(ProfileDraft(values).values.target == [ProfileRangeItem(seconds: 0, low: 100, high: 110)])
+        let trio = ProfileDraft(values, singleTarget: true)
+        #expect(trio.values.target == [ProfileRangeItem(seconds: 0, low: 100, high: 100)])
+        #expect(ProfileValueFormat.segmentText(trio.target[0], kind: .correctionRange, limits: nil, singleTarget: true) == "100")
+        #expect(ProfileRemote.trio.hasSingleTarget)
+        #expect(!ProfileRemote.loop.hasSingleTarget)
+
+        // The fingerprint LoopFollow computes from the values it sends equals the one of the store entry Trio uploads.
+        let sent = trio.values
+        let uploaded = try TherapyProfile(name: "Sport", store: Self.store(units: "mg/dL", sens: 50, low: 100, high: 100, basal: [(0, 0.85)]), documentUnits: "mg/dL")
+        #expect(sent.fingerprint == uploaded.fingerprint)
+    }
+
+    @Test("a save is refused when the profile changed or its active state differs from the review")
+    func saveStaleReason() throws {
+        let sport = try Self.store(units: "mg/dL", sens: 50, low: 100, high: 110)
+        let changed = try Self.store(units: "mg/dL", sens: 55, low: 100, high: 110)
+        let reviewed = TherapyProfileSet(Self.document(["Default": sport, "Sport": sport], active: "Default"))
+        let original = try #require(reviewed.profile(named: "Sport"))
+        func reason(_ store: [String: NSProfile.Store]?, active: String = "Default", reviewedActive: Bool = false) -> String? {
+            ProfileCommandFlow.saveStaleReason(
+                original: original,
+                reviewedActive: reviewedActive,
+                current: store.map { TherapyProfileSet(Self.document($0, active: active)) },
+                remote: .loop
+            )
+        }
+        #expect(reason(["Default": sport, "Sport": sport]) == nil)
+        #expect(reason(["Default": sport, "Sport": sport], active: "Sport", reviewedActive: true) == nil)
+        #expect(reason(["Default": sport, "Sport": sport], active: "Sport")?.contains("became active") == true)
+        #expect(reason(["Default": sport, "Sport": sport], reviewedActive: true)?.contains("no longer the active profile") == true)
+        #expect(reason(["Default": sport, "Sport": changed])?.contains("changed") == true)
+        #expect(reason(["Default": sport])?.contains("no longer in the list") == true)
+        #expect(reason(nil)?.contains("could not load") == true)
+    }
+
+    @Test("profile command keys are logged as their command kind, without the profile name")
+    func profileKeysLogWithoutName() {
+        #expect(RemoteCommandTracker.logKey(ProfileRemote.trio.key(.save, name: "Sport")) == "trio-profile-save")
+        #expect(RemoteCommandTracker.logKey(ProfileRemote.loop.key(.activate, name: "A:B")) == "loop-profile-switch")
+        #expect(RemoteCommandTracker.logKey("meal-1234567890") == LogRedactor.tail("meal-1234567890"))
+    }
+
+    @Test("Trio's measured push size keeps a margin for the nonce and timestamp of the send")
+    func trioPushSizeMargin() {
+        #expect(ProfilePushSize.reviewLimit(for: .loop) == APNSDelivery.maxPayloadBytes)
+        #expect(ProfilePushSize.reviewLimit(for: .trio) == APNSDelivery.maxPayloadBytes - 64)
     }
 }

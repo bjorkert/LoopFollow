@@ -139,6 +139,53 @@ struct RemoteCommandTrackerTests {
         #expect(LoopProfileAckAdapter.profileName(in: "Profile 'A' saved", kind: .delete) == nil)
     }
 
+    @Test("Loop profile names with apostrophes and quoted reasons are matched exactly")
+    func loopProfileNames() {
+        #expect(LoopProfileAckAdapter.profileName(in: "Profile 'It's School' saved", kind: .save) == "It's School")
+        #expect(LoopProfileAckAdapter.profileName(in: "Command failed: Profile 'A' not saved: Profile 'B' saved already", kind: .save) == "A")
+        #expect(LoopProfileAckAdapter.profileName(in: "Command failed: Profile 'Mom's' not activated: Profile 'X' activated", kind: .activate) == "Mom's")
+        #expect(LoopProfileAckAdapter.profileName(in: "Profile 'A' saved and more", kind: .save) == nil)
+        // A name that itself contains the failure phrase is found through the pending commands.
+        let tricky = "x' not saved: y"
+        let message = "Command failed: Profile '\(tricky)' not saved: conflict"
+        #expect(LoopProfileAckAdapter.profileName(in: message, kind: .save) == "x")
+        #expect(LoopProfileAckAdapter.profileName(in: message, kind: .save, candidates: ["x", tricky]) == tricky)
+
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let key = ProfileRemote.loop.key(.save, name: tricky)
+        tracker.begin(key: key)
+        let reply: [AnyHashable: Any] = [
+            "command_type": "profile_save",
+            "command_status": "failed",
+            "aps": ["alert": ["body": message]],
+        ]
+        #expect(tracker.handleNotification(userInfo: reply) == true)
+        #expect(tracker.states[key] == .done(success: false, message: message))
+    }
+
+    @Test("a profile command that times out finishes like a reply and leaves the review")
+    func profileTimeout() async throws {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let key = ProfileRemote.loop.key(.save, name: "Weekday")
+        var completed: [String] = []
+        let observer = NotificationCenter.default.addObserver(forName: .remoteMealCommandDidComplete, object: nil, queue: nil) { note in
+            if let key = note.userInfo?["key"] as? String { completed.append(key) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        tracker.begin(key: key, timeout: 0.05, timeoutMessage: ProfileRemote.loop.timeoutMessage)
+        for _ in 0 ..< 250 where tracker.isBusy(key: key) || !completed.contains(key) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(tracker.states[key] == .done(success: false, message: ProfileRemote.loop.timeoutMessage))
+        #expect(completed.contains(key))
+        #expect(ProfileRemote.isProfileCommandKey(key))
+
+        #expect(ProfileCommandFlow.leavesAfterResult(success: false, message: ProfileRemote.loop.timeoutMessage, remote: .loop))
+        #expect(ProfileCommandFlow.leavesAfterResult(success: true, message: "Profile 'Weekday' saved", remote: .loop))
+        #expect(!ProfileCommandFlow.leavesAfterResult(success: false, message: "Command failed: Profile 'Weekday' not saved: conflict", remote: .loop))
+        #expect(!ProfileCommandFlow.leavesAfterResult(success: false, message: ProfileRemote.trio.timeoutMessage, remote: .loop))
+    }
+
     @Test("Trio profile acks match the command id and fall back to a profile message")
     func trioProfileAck() throws {
         let tracker = RemoteCommandTracker(timeout: 60)

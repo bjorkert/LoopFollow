@@ -286,7 +286,9 @@ struct TherapyProfilePreviewView: View {
                 title: Text(ProfileCommandFlow.resultTitle(kind: kind, success: success, message: message, remote: remote)),
                 message: Text(message),
                 dismissButton: .default(Text("OK")) {
-                    if success { presentationMode.wrappedValue.dismiss() }
+                    if ProfileCommandFlow.leavesAfterResult(success: success, message: message, remote: remote) {
+                        presentationMode.wrappedValue.dismiss()
+                    }
                 }
             )
         }

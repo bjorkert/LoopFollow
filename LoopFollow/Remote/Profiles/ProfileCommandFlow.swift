@@ -43,6 +43,44 @@ enum ProfileCommandFlow {
         }
     }
 
+    /// True when the screen that sent the command closes after the result: on success, and when no reply came,
+    /// because the change may have been applied and the profile list shows the outcome. A refusal keeps the
+    /// screen open so the values can be corrected.
+    static func leavesAfterResult(success: Bool, message: String, remote: ProfileRemote) -> Bool {
+        success || message == remote.timeoutMessage
+    }
+
+    /// Loads the newest profile document from Nightscout. Completes on the main queue, with nil when it can not be loaded.
+    static func fetchProfileSet(completion: @escaping (TherapyProfileSet?) -> Void) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let parameters = ["count": "1", "find[startDate][$lte]": formatter.string(from: Date().addingTimeInterval(60))]
+        NightscoutUtils.executeRequest(eventType: .profile, parameters: parameters) { (result: Result<[NSProfile], Error>) in
+            let profileSet = (try? result.get())?.first.map(TherapyProfileSet.init)
+            DispatchQueue.main.async { completion(profileSet) }
+        }
+    }
+
+    /// Why a save of `original`, reviewed while it was `reviewedActive`, must not be sent now that `current` is the
+    /// newest profile document, or nil when it can be sent.
+    static func saveStaleReason(original: TherapyProfile, reviewedActive: Bool, current: TherapyProfileSet?, remote: ProfileRemote) -> String? {
+        guard let current else {
+            return "LoopFollow could not load the profiles from Nightscout to check that “\(original.name)” is unchanged, so nothing was sent. Try again."
+        }
+        guard let profile = current.profile(named: original.name) else {
+            return "“\(original.name)” is no longer in the list uploaded by \(remote.appName), so nothing was sent."
+        }
+        if profile.fingerprint != original.fingerprint {
+            return "“\(original.name)” changed in \(remote.appName) while you were editing, so nothing was sent. Review it again."
+        }
+        if current.isActive(profile) != reviewedActive {
+            return reviewedActive
+                ? "“\(original.name)” is no longer the active profile in \(remote.appName), so nothing was sent. Review it again."
+                : "“\(original.name)” became active in \(remote.appName) while you were editing, so nothing was sent. Review it again."
+        }
+        return nil
+    }
+
     /// The tracker keys of all profile commands for this app.
     static func isAnyPending(_ tracker: RemoteCommandTracker, remote: ProfileRemote) -> Bool {
         tracker.isBusy(keyPrefixes: remote.keyPrefixes)

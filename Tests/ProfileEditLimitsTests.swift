@@ -96,6 +96,23 @@ struct ProfileEditLimitsTests {
         #expect(limits.status(of: .nan, in: .sensitivity) == .notAllowed)
     }
 
+    @Test("the pump's basal entry limit caps basal schedules only")
+    func maxBasalSegments() throws {
+        let plain = try Self.limits()
+        #expect(plain.maxBasalSegments == nil)
+        #expect(plain.segmentLimit(for: .basal) == 48)
+        let omnipod = try Self.limits(Self.contractLimitsJSON.replacingOccurrences(of: "\"maxSegments\": 48", with: "\"maxSegments\": 48, \"maxBasalSegments\": 24"))
+        #expect(omnipod.maxBasalSegments == 24)
+        #expect(omnipod.isUsable)
+        #expect(omnipod.segmentLimit(for: .basal) == 24)
+        #expect(omnipod.segmentLimit(for: .carbRatio) == 48)
+        #expect(omnipod.segmentLimit(for: .correctionRange) == 48)
+        let generous = try Self.limits(Self.contractLimitsJSON.replacingOccurrences(of: "\"maxSegments\": 48", with: "\"maxSegments\": 12, \"maxBasalSegments\": 48"))
+        #expect(generous.segmentLimit(for: .basal) == 12)
+        let zero = try Self.limits(Self.contractLimitsJSON.replacingOccurrences(of: "\"maxSegments\": 48", with: "\"maxSegments\": 48, \"maxBasalSegments\": 0"))
+        #expect(!zero.isUsable)
+    }
+
     @Test("inconsistent limits are not usable")
     func unusable() throws {
         let badGrid = try Self.limits(Self.contractLimitsJSON.replacingOccurrences(of: "\"segmentSeconds\": 1800", with: "\"segmentSeconds\": 1700"))
@@ -103,7 +120,8 @@ struct ProfileEditLimitsTests {
         let badStep = try Self.limits(Self.contractLimitsJSON.replacingOccurrences(of: "\"step\": 0.1", with: "\"step\": 0"))
         #expect(!badStep.isUsable)
         #expect(ProfileEditing.blocker(limits: badStep, remote: .trio) != nil)
-        #expect(ProfileEditing.blocker(limits: nil, remote: .loop) != nil)
+        let missing = try #require(ProfileEditing.blocker(limits: nil, remote: .loop))
+        #expect(missing.contains("pump"))
         #expect(try ProfileEditing.blocker(limits: Self.limits(), remote: .loop) == nil)
     }
 }
