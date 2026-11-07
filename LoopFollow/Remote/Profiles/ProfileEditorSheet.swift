@@ -7,7 +7,13 @@ enum ProfileEditing {
     /// Why profiles of this set can not be edited remotely, or nil when they can.
     static func blocker(limits: ProfileEditLimits?, remote: ProfileRemote) -> String? {
         guard let limits else {
-            return "\(remote.appName) has not shared the limits LoopFollow needs to change profiles safely, so profiles can only be viewed here. \(remote.appName) shares them once a pump and a maximum basal rate are set up in it; an older version of \(remote.appName) may need an update first."
+            let missing = "\(remote.appName) has not shared the limits LoopFollow needs to change profiles safely, so profiles can only be viewed here."
+            switch remote {
+            case .loop:
+                return missing + " Loop shares them once a pump and a maximum basal rate are set up in it; an older version of Loop may need an update first."
+            case .trio:
+                return missing + " An older version of Trio may need an update first."
+            }
         }
         guard limits.isUsable else {
             return "The limits \(remote.appName) shared are incomplete, so profiles can only be viewed here."

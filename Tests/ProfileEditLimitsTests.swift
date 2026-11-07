@@ -122,6 +122,7 @@ struct ProfileEditLimitsTests {
         #expect(ProfileEditing.blocker(limits: badStep, remote: .trio) != nil)
         let missing = try #require(ProfileEditing.blocker(limits: nil, remote: .loop))
         #expect(missing.contains("pump"))
+        #expect(try !#require(ProfileEditing.blocker(limits: nil, remote: .trio)).contains("pump"))
         #expect(try ProfileEditing.blocker(limits: Self.limits(), remote: .loop) == nil)
     }
 }
