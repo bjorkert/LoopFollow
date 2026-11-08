@@ -371,7 +371,7 @@ struct ProfileRenameSheet: View {
                             remote: remote,
                             command: command,
                             baseline: profile,
-                            isActive: false,
+                            isActive: isActive,
                             limits: profileSet.limits,
                             onFinished: onFinished
                         )

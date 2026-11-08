@@ -271,6 +271,18 @@ struct TherapyProfileTests {
         #expect(reason(nil)?.contains("could not load") == true)
     }
 
+    @Test("a rename of the active profile is checked as active and keeps the values")
+    func renameActiveProfile() throws {
+        let sport = try Self.store(units: "mg/dL", sens: 50, low: 100, high: 110)
+        let profileSet = TherapyProfileSet(Self.document(["Default": sport, "Sport": sport], active: "Sport"))
+        let original = try #require(profileSet.profile(named: "Sport"))
+        let rename = ProfileCommand.save(name: "Sport 2", original: original, values: original.values)
+        #expect(rename.isRename)
+        #expect(!ProfileCommand.save(name: "Sport", original: original, values: original.values).isRename)
+        #expect(!ProfileCommand.save(name: "Sport 2", original: nil, values: original.values).isRename)
+        #expect(ProfileCommandFlow.saveStaleReason(original: original, reviewedActive: profileSet.isActive(original), current: profileSet, remote: .loop) == nil)
+    }
+
     @Test("profile command keys are logged as their command kind, without the profile name")
     func profileKeysLogWithoutName() {
         #expect(RemoteCommandTracker.logKey(ProfileRemote.trio.key(.save, name: "Sport")) == "trio-profile-save")

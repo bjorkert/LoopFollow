@@ -105,7 +105,7 @@ struct ProfileReviewView: View {
         List {
             Section {
                 Text(summary)
-                if isActive {
+                if appliesNow {
                     ActiveProfileWarning(remote: remote)
                 }
                 if !increases.isEmpty {
@@ -113,7 +113,7 @@ struct ProfileReviewView: View {
                         increases: increases,
                         basalTotal: ProfileInsulinComparison.basalTotalIncrease(from: baseline.values, to: values),
                         comparedWith: original?.name ?? baseline.name,
-                        appliesNow: isActive
+                        appliesNow: appliesNow
                     )
                 }
             }
@@ -168,13 +168,13 @@ struct ProfileReviewView: View {
                     } else if otherPending {
                         Text("Another Profile Command Is Pending")
                     } else {
-                        Text(isActive ? "Send and Apply Now" : "Send to \(remote.appName)")
+                        Text(appliesNow ? "Send and Apply Now" : "Send to \(remote.appName)")
                     }
                 }
                 .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .tint(isActive ? .red : .accentColor)
+            .tint(appliesNow ? .red : .accentColor)
             .controlSize(.large)
             .disabled(!canSend)
             .padding(.horizontal)
@@ -196,7 +196,7 @@ struct ProfileReviewView: View {
                 return Alert(
                     title: Text(confirmTitle),
                     message: Text(confirmMessage),
-                    primaryButton: isActive ? .destructive(Text("Send"), action: send) : .default(Text("Send"), action: send),
+                    primaryButton: appliesNow ? .destructive(Text("Send"), action: send) : .default(Text("Send"), action: send),
                     secondaryButton: .cancel()
                 )
             case let .result(result):
@@ -222,7 +222,12 @@ struct ProfileReviewView: View {
     }
 
     private var isRename: Bool {
-        original.map { $0.name != command.targetName } ?? false
+        command.isRename
+    }
+
+    /// True when the command changes the values the phone doses with as soon as it arrives. A rename keeps the values.
+    private var appliesNow: Bool {
+        isActive && !isRename
     }
 
     private var confirmTitle: String {

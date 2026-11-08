@@ -40,6 +40,12 @@ enum ProfileCommand: Equatable {
         case .saveScheduledSwitches: return Self.scheduledSwitchesTarget
         }
     }
+
+    /// True for a save that gives an existing profile a new name.
+    var isRename: Bool {
+        guard case let .save(name, original?, _) = self else { return false }
+        return original.name != name
+    }
 }
 
 /// The AID app the profile commands go to, with its command names and tracker keys.
