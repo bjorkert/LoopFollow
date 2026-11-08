@@ -295,7 +295,8 @@ struct TherapyProfilePreviewView: View {
         case let .confirmDelete(fingerprint):
             return Alert(
                 title: Text("Delete \(name)?"),
-                message: Text("\(remote.appName) removes this profile. This can't be undone from LoopFollow."),
+                message: Text("\(remote.appName) removes this profile. This can't be undone from LoopFollow."
+                    + (profileSet.flatMap { ScheduledSwitches.deletionText($0.scheduledSwitches, profileName: name) }.map { " " + $0 } ?? "")),
                 primaryButton: .destructive(Text("Delete")) { send(.delete, fingerprint: fingerprint) },
                 secondaryButton: .cancel()
             )

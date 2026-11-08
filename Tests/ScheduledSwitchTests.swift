@@ -266,6 +266,16 @@ struct ScheduledSwitchTests {
         #expect(ScheduledSwitches.holdText(list([]), now: friday) == nil)
     }
 
+    @Test("deleting a profile names the scheduled switches that go with it, counted case-insensitively")
+    func deletionText() {
+        let weekendSunday = ScheduledProfileSwitch(id: "C4F1A2B3-5D6E-4F70-8A91-B2C3D4E5F6A7", profile: "weekend", weekday: 1, time: 25200)
+        let list = ScheduledSwitchList(entries: [Self.weekend, weekendSunday, Self.school], fingerprint: "", isComplete: true, timeZone: .current)
+        #expect(ScheduledSwitches.deletionText(list, profileName: "Weekend")
+            == "Weekend is used by 2 scheduled switches, which will be removed. At those times the profile active before stays active until the next scheduled start.")
+        #expect(ScheduledSwitches.deletionText(list, profileName: "Default")?.hasPrefix("Default is used by 1 scheduled switch, which will be removed.") == true)
+        #expect(ScheduledSwitches.deletionText(list, profileName: "Sport") == nil)
+    }
+
     // MARK: Pause, resume and the review diff
 
     @Test("pausing a start changes only that start's paused flag, and the diff lists it as paused")

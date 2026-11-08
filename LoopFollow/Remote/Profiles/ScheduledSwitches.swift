@@ -226,6 +226,16 @@ enum ScheduledSwitches {
         return "It stays active until \(startText(next.entry))."
     }
 
+    /// The sentences for deleting a profile: the scheduled switches that go with it, and what that does to the week.
+    static func deletionText(_ list: ScheduledSwitchList, profileName: String) -> String? {
+        let count = list.entries.filter { $0.profile.caseInsensitiveCompare(profileName) == .orderedSame }.count
+        guard count > 0 else { return nil }
+        let removed = count == 1
+            ? "\(profileName) is used by 1 scheduled switch, which will be removed."
+            : "\(profileName) is used by \(count) scheduled switches, which will be removed."
+        return removed + " At those times the profile active before stays active until the next scheduled start."
+    }
+
     /// A note when the profile's time zone is not this phone's.
     static func timeZoneNote(_ timeZone: TimeZone, now: Date = Date()) -> String? {
         guard timeZone.secondsFromGMT(for: now) != TimeZone.current.secondsFromGMT(for: now) else { return nil }
