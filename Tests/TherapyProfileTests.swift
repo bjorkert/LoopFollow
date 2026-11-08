@@ -141,9 +141,9 @@ struct TherapyProfileTests {
         #expect(loop.profiles[0].isDefault)
 
         let trio = TherapyProfileSet(Self.document(["default": entry, "school": entry], active: "default"))
-        #expect(trio.profiles.map(\.name) == ["default", "school"])
+        #expect(trio.profiles.map(\.name) == ["Default", "school"])
         #expect(trio.profiles[0].isDefault)
-        #expect(trio.activeProfile?.name == "default")
+        #expect(trio.activeProfile?.name == "Default")
         #expect(TherapyProfile.isDefaultName("DEFAULT"))
         #expect(!TherapyProfile.isDefaultName("Defaults"))
     }

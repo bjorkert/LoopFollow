@@ -5,7 +5,7 @@ import Foundation
 
 /// The scheduled switches in the latest profile document of Loop or Trio.
 struct ScheduledSwitchList: Equatable {
-    /// The entries as uploaded.
+    /// The entries, with Trio's `default` named Default as in the profile list.
     let entries: [ScheduledProfileSwitch]
     /// Fingerprint of the list as uploaded. A replace command sends it so the phone only replaces this list.
     let fingerprint: String
@@ -31,7 +31,11 @@ struct ScheduledSwitchList: Equatable {
         let fingerprint = ScheduledProfileSwitch.fingerprint(raw)
         let uploaded = profile.scheduledSwitchesFingerprint
         self.init(
-            entries: raw,
+            entries: raw.map { entry in
+                var entry = entry
+                if TherapyProfile.isDefaultName(entry.profile) { entry.profile = TherapyProfile.defaultName }
+                return entry
+            },
             fingerprint: fingerprint,
             isComplete: readable && raw.count == decoded.count && (uploaded == nil || uploaded == fingerprint),
             timeZone: profile.store[profile.defaultProfile].map { ScheduledSwitches.timeZone(identifier: $0.timezone) } ?? .current

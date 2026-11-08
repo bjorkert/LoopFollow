@@ -69,10 +69,11 @@ struct TherapyProfile: Identifiable, Equatable {
         }
     }
 
-    /// Every profile in a profile document, Default first, then by name.
+    /// Every profile in a profile document, Default first, then by name. Trio's `default` entry is named Default, which
+    /// Trio's commands also accept.
     static func profiles(from profile: NSProfile) -> [TherapyProfile] {
         profile.store
-            .map { TherapyProfile(name: $0.key, store: $0.value, documentUnits: profile.units) }
+            .map { TherapyProfile(name: isDefaultName($0.key) ? defaultName : $0.key, store: $0.value, documentUnits: profile.units) }
             .sorted { lhs, rhs in
                 if lhs.isDefault != rhs.isDefault { return lhs.isDefault }
                 return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending

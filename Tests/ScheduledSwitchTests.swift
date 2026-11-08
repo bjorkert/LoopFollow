@@ -103,7 +103,7 @@ struct ScheduledSwitchTests {
         #expect(ProfileRemote.loop.supports(.saveScheduledSwitches, in: document.remoteCommands ?? []))
     }
 
-    @Test("a Trio document's scheduled switches are read with the fingerprint of the uploaded names")
+    @Test("Trio's default is shown as Default while the fingerprint is that of the uploaded names")
     func trioDocument() throws {
         let switches = #"[{"id":"A","profile":"default","weekday":2,"time":21600,"paused":true},{"id":"B","profile":"Weekend","weekday":7,"time":25200}]"#
         let raw = [ScheduledProfileSwitch(id: "A", profile: "default", weekday: 2, time: 21600, paused: true),
@@ -111,7 +111,7 @@ struct ScheduledSwitchTests {
         let document = try Self.document(store: ["default", "Weekend"], active: "default", switches: switches,
                                          fingerprint: ScheduledProfileSwitch.fingerprint(raw), commands: ["save_scheduled_switches"])
         let list = TherapyProfileSet(document).scheduledSwitches
-        #expect(list.entries.map(\.profile) == ["default", "Weekend"])
+        #expect(list.entries.map(\.profile) == ["Default", "Weekend"])
         #expect(list.entries[0].paused)
         #expect(list.fingerprint == ScheduledProfileSwitch.fingerprint(raw))
         #expect(list.isComplete)
