@@ -247,7 +247,7 @@ struct ScheduledSwitchEntryEditor: View {
         Form {
             if let index {
                 let entry = draft[index]
-                Section(footer: Text("\(entry.profile) starts every \(ScheduledSwitches.weekdayName(entry.weekday)) at \(ScheduledSwitches.timeText(entry.time)) and stays active until the next scheduled start.")) {
+                Section(footer: Text("\(entry.paused ? "Paused. When resumed, " : "")\(entry.profile) starts every \(ScheduledSwitches.weekdayName(entry.weekday)) at \(ScheduledSwitches.timeText(entry.time)) and stays active until the next scheduled start.")) {
                     Picker("Profile", selection: $draft[index].profile) {
                         ForEach(profileNames, id: \.self) { Text($0).tag($0) }
                     }
