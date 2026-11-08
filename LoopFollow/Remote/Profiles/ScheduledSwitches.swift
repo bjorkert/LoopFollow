@@ -312,4 +312,21 @@ enum ScheduledSwitchDiff {
         }
         return names
     }
+
+    /// The profiles that start in the new list where they did not before and give more insulin than Default
+    /// somewhere, compared in mg/dL whatever units each profile has.
+    static func moreInsulinProfiles(
+        from old: [ScheduledProfileSwitch],
+        to new: [ScheduledProfileSwitch],
+        profiles: [TherapyProfile]
+    ) -> [(profile: TherapyProfile, increases: [ProfileInsulinIncrease])] {
+        guard let base = profiles.first(where: \.isDefault) else { return [] }
+        return newlyStartingProfiles(from: old, to: new).compactMap { name in
+            guard let profile = profiles.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }), !profile.isDefault else {
+                return nil
+            }
+            let increases = ProfileInsulinComparison.increases(from: base.values, to: profile.values)
+            return increases.isEmpty ? nil : (profile, increases)
+        }
+    }
 }

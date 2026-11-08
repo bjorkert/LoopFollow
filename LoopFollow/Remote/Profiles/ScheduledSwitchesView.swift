@@ -336,14 +336,7 @@ struct ScheduledSwitchesReviewView: View {
 
     /// Profiles that start in the new list and give more insulin than Default somewhere.
     private var increases: [(profile: TherapyProfile, increases: [ProfileInsulinIncrease])] {
-        guard let base = profileSet.profiles.first(where: \.isDefault) else { return [] }
-        return ScheduledSwitchDiff.newlyStartingProfiles(from: list.entries, to: entries).compactMap { name in
-            guard let profile = profileSet.profiles.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }),
-                  !profile.isDefault, profile.values.units == base.values.units
-            else { return nil }
-            let increases = ProfileInsulinComparison.increases(from: base.values, to: profile.values)
-            return increases.isEmpty ? nil : (profile, increases)
-        }
+        ScheduledSwitchDiff.moreInsulinProfiles(from: list.entries, to: entries, profiles: profileSet.profiles)
     }
 
     private var isTooLarge: Bool { (pushSize ?? 0) > ProfilePushSize.reviewLimit(for: remote) }

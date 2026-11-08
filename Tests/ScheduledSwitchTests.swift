@@ -455,6 +455,19 @@ struct ScheduledSwitchTests {
         )
     }
 
+    @Test("a newly starting profile that gives more insulin than Default is found also when its units differ")
+    func moreInsulinAcrossUnits() throws {
+        let base = try TherapyProfile(name: "Default", store: TherapyProfileTests.store(units: "mg/dL", sens: 50, low: 100, high: 110, basal: [(0, 1.0)]))
+        let stronger = try TherapyProfile(name: "Weekend", store: TherapyProfileTests.store(units: "mmol/L", sens: 2.0, low: 5.6, high: 6.2, basal: [(0, 1.0)]))
+        let same = try TherapyProfile(name: "Weekend", store: TherapyProfileTests.store(units: "mmol/L", sens: 2.8, low: 5.6, high: 6.2, basal: [(0, 1.0)]))
+
+        let found = ScheduledSwitchDiff.moreInsulinProfiles(from: [], to: [Self.weekend], profiles: [base, stronger])
+        #expect(found.map(\.profile.name) == ["Weekend"])
+        #expect(found.first?.increases.map(\.kind).contains(.sensitivity) == true)
+        #expect(ScheduledSwitchDiff.moreInsulinProfiles(from: [], to: [Self.weekend], profiles: [base, same]).isEmpty)
+        #expect(ScheduledSwitchDiff.moreInsulinProfiles(from: [Self.weekend], to: [Self.weekend], profiles: [base, stronger]).isEmpty)
+    }
+
     @Test("a list is not sent when the phone's list or its profiles changed since the review")
     func staleBeforeSending() throws {
         let reviewed = [Self.weekend, Self.school]
