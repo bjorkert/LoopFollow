@@ -231,15 +231,15 @@ struct ScheduledSwitchEntryEditor: View {
             if let index {
                 let entry = draft[index]
                 Section(footer: Text("\(entry.paused ? "Paused. When resumed, " : "")\(entry.profile) starts every \(ScheduledSwitches.weekdayName(entry.weekday)) at \(ScheduledSwitches.timeText(entry.time)) and stays active until the next scheduled start.")) {
-                    Picker("Profile", selection: $draft[index].profile) {
+                    Picker("Profile", selection: field(\.profile, of: entry)) {
                         ForEach(profileNames, id: \.self) { Text($0).tag($0) }
                     }
-                    Picker("Day", selection: $draft[index].weekday) {
+                    Picker("Day", selection: field(\.weekday, of: entry)) {
                         ForEach(ScheduledSwitches.weekdaysFromMonday, id: \.self) { weekday in
                             Text(ScheduledSwitches.weekdayName(weekday)).tag(weekday)
                         }
                     }
-                    DatePicker("Time", selection: timeBinding(index), displayedComponents: .hourAndMinute)
+                    DatePicker("Time", selection: timeBinding(entry), displayedComponents: .hourAndMinute)
                         .environment(\.timeZone, Self.utc)
                 }
 
@@ -248,7 +248,7 @@ struct ScheduledSwitchEntryEditor: View {
                 }
 
                 Section(footer: Text("A paused start does not run until it is resumed. Nothing switches when it is resumed; the start runs again at its next time.")) {
-                    Toggle("Paused", isOn: $draft[index].paused)
+                    Toggle("Paused", isOn: field(\.paused, of: entry))
                 }
 
                 Section {
@@ -263,16 +263,28 @@ struct ScheduledSwitchEntryEditor: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    /// The time of day as a date on 1 January 1970 in UTC, as the profile times are shown.
-    private func timeBinding(_ index: Int) -> Binding<Date> {
+    /// A field of the start, found by its id on each access. Controls that are still on screen while the start is
+    /// deleted read `entry`'s value and change nothing.
+    private func field<Value>(_ keyPath: WritableKeyPath<ScheduledProfileSwitch, Value>, of entry: ScheduledProfileSwitch) -> Binding<Value> {
         Binding(
-            get: { Date(timeIntervalSince1970: TimeInterval(draft.indices.contains(index) ? draft[index].time : 0)) },
+            get: { draft.first { $0.id == id }?[keyPath: keyPath] ?? entry[keyPath: keyPath] },
+            set: { value in
+                guard let index = draft.firstIndex(where: { $0.id == id }) else { return }
+                draft[index][keyPath: keyPath] = value
+            }
+        )
+    }
+
+    /// The time of day as a date on 1 January 1970 in UTC, as the profile times are shown.
+    private func timeBinding(_ entry: ScheduledProfileSwitch) -> Binding<Date> {
+        let time = field(\.time, of: entry)
+        return Binding(
+            get: { Date(timeIntervalSince1970: TimeInterval(time.wrappedValue)) },
             set: { date in
-                guard draft.indices.contains(index) else { return }
                 var calendar = Calendar(identifier: .gregorian)
                 calendar.timeZone = Self.utc
                 let parts = calendar.dateComponents([.hour, .minute], from: date)
-                draft[index].time = (parts.hour ?? 0) * 3600 + (parts.minute ?? 0) * 60
+                time.wrappedValue = (parts.hour ?? 0) * 3600 + (parts.minute ?? 0) * 60
             }
         )
     }
