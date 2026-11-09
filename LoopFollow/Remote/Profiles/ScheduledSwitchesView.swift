@@ -40,21 +40,17 @@ struct ScheduledSwitchRow: View {
     }
 }
 
-/// The scheduled switches section of the profile list: the week with pause and resume per start, and the editor.
+/// The scheduled switches section of the profile list: the week with pause and resume per start, and the button
+/// for the editor. The list presents the editor and the review of a pause or resume.
 struct ScheduledSwitchesSection: View {
     let remote: ProfileRemote
     let profileSet: TherapyProfileSet
     let commands: [String]
+    let onEdit: () -> Void
+    /// Called with the whole list after pausing or resuming one start, for review before sending.
+    let onTogglePause: ([ScheduledProfileSwitch]) -> Void
 
     @ObservedObject private var tracker = RemoteCommandTracker.shared
-    @State private var editing = false
-    @State private var pauseChange: PauseChange?
-
-    /// A pause or resume of one start, reviewed before it is sent.
-    struct PauseChange: Identifiable {
-        let entries: [ScheduledProfileSwitch]
-        let id = UUID()
-    }
 
     private var list: ScheduledSwitchList { profileSet.scheduledSwitches }
     private var supported: Bool { remote.supports(.saveScheduledSwitches, in: commands) }
@@ -76,24 +72,11 @@ struct ScheduledSwitchesSection: View {
                 }
                 if supported {
                     Button {
-                        editing = true
+                        onEdit()
                     } label: {
                         Label("Edit Scheduled Switches", systemImage: "calendar")
                     }
                     .disabled(!canChange)
-                }
-            }
-            .sheet(isPresented: $editing) {
-                ScheduledSwitchesEditorSheet(remote: remote, profileSet: profileSet) { editing = false }
-            }
-            .sheet(item: $pauseChange) { change in
-                NavigationStack {
-                    ScheduledSwitchesReviewView(remote: remote, profileSet: profileSet, entries: change.entries) { pauseChange = nil }
-                        .toolbar {
-                            ToolbarItem(placement: .cancellationAction) {
-                                Button("Cancel") { pauseChange = nil }
-                            }
-                        }
                 }
             }
         }
@@ -114,7 +97,7 @@ struct ScheduledSwitchesSection: View {
     }
 
     private func togglePause(_ entry: ScheduledProfileSwitch) {
-        pauseChange = PauseChange(entries: ScheduledSwitches.togglingPause(of: entry.id, in: list.entries))
+        onTogglePause(ScheduledSwitches.togglingPause(of: entry.id, in: list.entries))
     }
 }
 

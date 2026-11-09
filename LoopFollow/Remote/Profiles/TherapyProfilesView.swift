@@ -11,7 +11,21 @@ struct TherapyProfilesView: View {
     @ObservedObject private var therapyProfiles = Observable.shared.therapyProfiles
     @ObservedObject private var remoteCommands = Storage.shared.remoteCommands
     @ObservedObject private var loopRemoteCommands = Storage.shared.loopRemoteCommands
-    @State private var newProfileSource: TherapyProfile?
+    @State private var sheet: ListSheet?
+
+    /// A sheet opened from the list. It keeps the profiles it was opened with, and is attached to the list itself,
+    /// so it stays open with its result alert while the profiles are reloaded.
+    private struct ListSheet: Identifiable {
+        enum Kind {
+            case newProfile(source: TherapyProfile)
+            case scheduledSwitches
+            case pause(entries: [ScheduledProfileSwitch])
+        }
+
+        let kind: Kind
+        let profileSet: TherapyProfileSet
+        let id = UUID()
+    }
 
     private var commands: [String] {
         remote.acceptedCommands(profileDocument: remoteCommands.value, loopDeviceStatus: loopRemoteCommands.value)
@@ -53,13 +67,21 @@ struct TherapyProfilesView: View {
                     }
                 }
 
-                ScheduledSwitchesSection(remote: remote, profileSet: profileSet, commands: commands)
+                ScheduledSwitchesSection(
+                    remote: remote,
+                    profileSet: profileSet,
+                    commands: commands,
+                    onEdit: { sheet = ListSheet(kind: .scheduledSwitches, profileSet: profileSet) },
+                    onTogglePause: { sheet = ListSheet(kind: .pause(entries: $0), profileSet: profileSet) }
+                )
 
                 if canSave {
                     let createBlocker = ProfileEditing.blocker(limits: profileSet.limits, remote: remote) ?? ProfileValidation.countProblem(profileCount: profileSet.profiles.count)
                     Section(footer: Text(createBlocker ?? "A new profile starts as a copy of the active profile. Dosing does not change until it is activated.")) {
                         Button {
-                            newProfileSource = profileSet.activeProfile ?? profileSet.profiles.first
+                            if let source = profileSet.activeProfile ?? profileSet.profiles.first {
+                                sheet = ListSheet(kind: .newProfile(source: source), profileSet: profileSet)
+                            }
                         } label: {
                             Label("New Profile", systemImage: "plus")
                         }
@@ -75,10 +97,22 @@ struct TherapyProfilesView: View {
             }
         }
         .navigationBarTitle("Remote Profiles", displayMode: .inline)
-        .sheet(item: $newProfileSource) { source in
-            if let profileSet = therapyProfiles.value {
-                ProfileEditorSheet(remote: remote, mode: .new(source: source), profileSet: profileSet) {
-                    newProfileSource = nil
+        .sheet(item: $sheet) { sheet in
+            switch sheet.kind {
+            case let .newProfile(source):
+                ProfileEditorSheet(remote: remote, mode: .new(source: source), profileSet: sheet.profileSet) {
+                    self.sheet = nil
+                }
+            case .scheduledSwitches:
+                ScheduledSwitchesEditorSheet(remote: remote, profileSet: sheet.profileSet) { self.sheet = nil }
+            case let .pause(entries):
+                NavigationStack {
+                    ScheduledSwitchesReviewView(remote: remote, profileSet: sheet.profileSet, entries: entries) { self.sheet = nil }
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") { self.sheet = nil }
+                            }
+                        }
                 }
             }
         }
@@ -104,8 +138,19 @@ struct TherapyProfilePreviewView: View {
     @ObservedObject private var loopRemoteCommands = Storage.shared.loopRemoteCommands
     @ObservedObject private var tracker = RemoteCommandTracker.shared
     @State private var alertType: AlertType?
-    @State private var editing = false
-    @State private var renaming = false
+    @State private var sheet: ProfileSheet?
+
+    /// An edit or rename of the profile. It keeps the profile and profiles it was opened with, and is attached
+    /// outside the profile's values, so it stays open with its result alert while the profiles are reloaded,
+    /// also when the profile is renamed.
+    private struct ProfileSheet: Identifiable {
+        enum Kind { case edit, rename }
+
+        let kind: Kind
+        let profile: TherapyProfile
+        let profileSet: TherapyProfileSet
+        let id = UUID()
+    }
 
     private enum AlertType: Identifiable {
         /// The confirmations carry the fingerprint of the profile they show.
@@ -172,6 +217,24 @@ struct TherapyProfilePreviewView: View {
             alertType = .result(kind: kind, result)
         }
         .alert(item: $alertType) { type in alert(type) }
+        .sheet(item: $sheet) { sheet in
+            switch sheet.kind {
+            case .edit:
+                ProfileEditorSheet(remote: remote, mode: .edit(sheet.profile), profileSet: sheet.profileSet) {
+                    self.sheet = nil
+                }
+            case .rename:
+                ProfileRenameSheet(remote: remote, profile: sheet.profile, profileSet: sheet.profileSet, isActive: sheet.profileSet.isActive(sheet.profile)) {
+                    self.sheet = nil
+                    presentationMode.wrappedValue.dismiss()
+                }
+            }
+        }
+    }
+
+    private func open(_ kind: ProfileSheet.Kind, _ profile: TherapyProfile) {
+        guard let profileSet else { return }
+        sheet = ProfileSheet(kind: kind, profile: profile, profileSet: profileSet)
     }
 
     private func content(_ profile: TherapyProfile) -> some View {
@@ -205,7 +268,7 @@ struct TherapyProfilePreviewView: View {
         .toolbar {
             if remote.supports(.save, in: commands) {
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Edit") { editing = true }
+                    Button("Edit") { open(.edit, profile) }
                         .disabled(editBlocker != nil || anyPending)
                 }
             }
@@ -215,21 +278,6 @@ struct TherapyProfilePreviewView: View {
                 activateButton
             }
         }
-        .sheet(isPresented: $editing) {
-            if let profileSet {
-                ProfileEditorSheet(remote: remote, mode: .edit(profile), profileSet: profileSet) {
-                    editing = false
-                }
-            }
-        }
-        .sheet(isPresented: $renaming) {
-            if let profileSet {
-                ProfileRenameSheet(remote: remote, profile: profile, profileSet: profileSet, isActive: isActive) {
-                    renaming = false
-                    presentationMode.wrappedValue.dismiss()
-                }
-            }
-        }
     }
 
     @ViewBuilder
@@ -237,7 +285,7 @@ struct TherapyProfilePreviewView: View {
         let canDelete = remote.supports(.delete, in: commands) && !isActive && !profile.isDefault
         Section(footer: actionsFooter(profile)) {
             if remote.supports(.save, in: commands), !profile.isDefault {
-                Button("Rename Profile") { renaming = true }
+                Button("Rename Profile") { open(.rename, profile) }
                     .disabled(editBlocker != nil || anyPending)
             }
             if remote.supports(.delete, in: commands), !profile.isDefault, !isActive {
