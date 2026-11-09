@@ -186,6 +186,22 @@ struct RemoteCommandTrackerTests {
         #expect(tracker.states[key] == .done(success: false, message: message))
     }
 
+    @Test("a pending profile command whose change shows in the uploaded profiles finishes as applied")
+    func profileCommandSeen() throws {
+        let tracker = RemoteCommandTracker(timeout: 60)
+        let profile = try TherapyProfile(name: "Sport", store: TherapyProfileTests.store(units: "mg/dL", sens: 45, low: 100, high: 110))
+        let key = tracker.beginProfileCommand(.activate(profile), to: .trio)
+
+        tracker.resolveProfileCommandSeen(.delete(profile))
+        #expect(tracker.isBusy(key: key))
+
+        tracker.resolveProfileCommandSeen(.activate(profile))
+        #expect(tracker.states[key] == .done(success: true, message: ProfileRemote.trio.seenMessage(.activate(profile))))
+
+        tracker.resolve(key: key, success: false, message: "late reply")
+        #expect(tracker.states[key] == .done(success: true, message: ProfileRemote.trio.seenMessage(.activate(profile))))
+    }
+
     @Test("a profile command that times out finishes like a reply and leaves the review")
     func profileTimeout() async throws {
         let tracker = RemoteCommandTracker(timeout: 60)

@@ -85,6 +85,9 @@ final class RemoteCommandRefresh {
             if arrived() {
                 LogManager.shared.log(category: .apns, message: "The \(change.name) showed up; \(Self.delays.count - step) early fetches skipped")
                 self.cancel()
+                if case let .profile(command) = change {
+                    RemoteCommandTracker.shared.resolveProfileCommandSeen(command)
+                }
                 return
             }
             for task in change.tasks {

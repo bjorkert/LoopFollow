@@ -138,6 +138,11 @@ enum ProfileRemote: String {
         }
     }
 
+    /// The result of a command whose reply did not arrive, but whose change shows in the uploaded profiles.
+    func seenMessage(_ command: ProfileCommand) -> String {
+        "\(successMessage(command)). The reply from \(appName) did not arrive, but the profiles \(appName) uploaded to Nightscout show the change."
+    }
+
     func failureMessage(_ command: ProfileCommand) -> String {
         switch command.kind {
         case .activate: return "Profile '\(command.targetName)' not activated"

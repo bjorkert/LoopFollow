@@ -116,6 +116,19 @@ final class RemoteCommandTracker: ObservableObject {
         return true
     }
 
+    /// Resolves the pending profile command `command` as applied once the profiles uploaded to Nightscout show its
+    /// change, for when the app's reply push does not arrive.
+    func resolveProfileCommandSeen(_ command: ProfileCommand) {
+        onMain {
+            for remote in [ProfileRemote.loop, .trio] {
+                let key = remote.key(for: command)
+                guard self.profileCommands[key] == command, self.isBusy(key: key) else { continue }
+                LogManager.shared.log(category: .apns, message: "No reply for \(Self.logKey(key)); the change shows in the uploaded profiles")
+                self.resolve(key: key, success: true, message: remote.seenMessage(command))
+            }
+        }
+    }
+
     private func onMain(_ work: @escaping () -> Void) {
         if Thread.isMainThread { work() } else { DispatchQueue.main.async(execute: work) }
     }
@@ -388,10 +401,8 @@ extension RemoteCommandTracker {
 
     /// Sends a profile command and tracks it under `ProfileRemote.key(for:)` until the reply or the timeout.
     func sendProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote, completion sent: @escaping (Bool, String?) -> Void) {
-        let key = remote.key(for: command)
+        let key = beginProfileCommand(command, to: remote)
         let completion = RemoteCommandRefresh.following(.profile(command), sent)
-        onMain { self.profileCommands[key] = command }
-        begin(key: key, timeout: ProfileRemote.timeout, timeoutMessage: remote.timeoutMessage)
         switch remote {
         case .loop:
             guard let otp = loopOTP(key: key, completion: completion) else { return }
@@ -427,6 +438,14 @@ extension RemoteCommandTracker {
                 manager.sendScheduledSwitchesSavePushNotification(entries: entries, baseFingerprint: baseFingerprint, commandID: commandID, completion: finish)
             }
         }
+    }
+
+    /// Marks `command` as pending under its key and returns the key.
+    func beginProfileCommand(_ command: ProfileCommand, to remote: ProfileRemote) -> String {
+        let key = remote.key(for: command)
+        onMain { self.profileCommands[key] = command }
+        begin(key: key, timeout: ProfileRemote.timeout, timeoutMessage: remote.timeoutMessage)
+        return key
     }
 
     private func loopOTP(key: String, completion: (Bool, String?) -> Void) -> String? {
