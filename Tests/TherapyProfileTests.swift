@@ -226,6 +226,18 @@ struct TherapyProfileTests {
         #expect(Set(texts).count == starts.count)
     }
 
+    @Test("Glucose values in mmol/L show one decimal; other values keep theirs")
+    func mmolGlucoseOneDecimal() {
+        func local(_ text: String) -> String {
+            text.replacingOccurrences(of: ".", with: Locale.current.decimalSeparator ?? ".")
+        }
+        let range = EditableSegment(seconds: 0, value: 5.551, high: 6.106)
+        #expect(ProfileValueFormat.segmentText(range, kind: .correctionRange, limits: nil, glucoseUnits: "mmol/L") == local("5.6 – 6.1"))
+        #expect(ProfileValueFormat.text(2.498, kind: .sensitivity, limits: nil, glucoseUnits: "mmol") == local("2.5"))
+        #expect(ProfileValueFormat.text(100, kind: .correctionRange, limits: nil, glucoseUnits: "mg/dL") == "100")
+        #expect(ProfileValueFormat.text(0.075, kind: .basal, limits: nil, glucoseUnits: "mmol/L") == local("0.075"))
+    }
+
     @Test("Trio profiles carry one target per time: the draft sends high equal to low")
     func trioSingleTarget() throws {
         let values = TherapyProfileValues(
@@ -238,7 +250,7 @@ struct TherapyProfileTests {
         #expect(ProfileDraft(values).values.target == [ProfileRangeItem(seconds: 0, low: 100, high: 110)])
         let trio = ProfileDraft(values, singleTarget: true)
         #expect(trio.values.target == [ProfileRangeItem(seconds: 0, low: 100, high: 100)])
-        #expect(ProfileValueFormat.segmentText(trio.target[0], kind: .correctionRange, limits: nil, singleTarget: true) == "100")
+        #expect(ProfileValueFormat.segmentText(trio.target[0], kind: .correctionRange, limits: nil, glucoseUnits: "mg/dL", singleTarget: true) == "100")
         #expect(ProfileRemote.trio.hasSingleTarget)
         #expect(!ProfileRemote.loop.hasSingleTarget)
 

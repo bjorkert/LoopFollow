@@ -145,7 +145,7 @@ struct ProfileReviewView: View {
             }
 
             Section {
-                ProfileCareTeamNote()
+                ProfileDosingNote()
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }
@@ -253,7 +253,7 @@ struct ProfileReviewView: View {
         let singleTarget = remote.hasSingleTarget
         let old = ProfileDraft(baseline.values, singleTarget: singleTarget)[kind]
         let new = ProfileDraft(values, singleTarget: singleTarget)[kind]
-        let rows = ProfileDiff.rows(old: old, new: new) { ProfileValueFormat.segmentText($0, kind: kind, limits: limits, singleTarget: singleTarget) }
+        let rows = ProfileDiff.rows(old: old, new: new) { ProfileValueFormat.segmentText($0, kind: kind, limits: limits, glucoseUnits: values.units, singleTarget: singleTarget) }
         let changed = rows.contains(where: \.changed) || old.map(\.seconds) != new.map(\.seconds)
         let moreInsulin = increases.first { $0.kind == kind }?.periods ?? []
         let footer = changed

@@ -17,9 +17,9 @@ enum ScheduledSwitchEditing {
 }
 
 /// The note shown with the scheduled switches and before a change to them is sent.
-struct ScheduledSwitchCareTeamNote: View {
+struct ScheduledSwitchDosingNote: View {
     var body: some View {
-        Text("A scheduled switch changes the profile that doses insulin at the set time, also when nobody is looking at the phone. Agree on the schedule and the profiles in it with the care team. LoopFollow does not give medical advice.")
+        Text("A scheduled switch changes the profile that doses insulin at the set time, also when nobody is looking at the phone.")
     }
 }
 
@@ -181,7 +181,7 @@ struct ScheduledSwitchesEditorSheet: View {
                 }
 
                 Section {
-                    ScheduledSwitchCareTeamNote()
+                    ScheduledSwitchDosingNote()
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }
@@ -390,7 +390,7 @@ struct ScheduledSwitchesReviewView: View {
             }
 
             Section {
-                ScheduledSwitchCareTeamNote()
+                ScheduledSwitchDosingNote()
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }

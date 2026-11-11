@@ -3,26 +3,29 @@
 
 import SwiftUI
 
-/// Formats profile values in the profile's own units, with as many decimals as the value has (up to three),
-/// so a value is never shown rounded.
+/// Formats profile values in the profile's own units. Glucose values in mmol/L have one decimal; other values
+/// show as many decimals as they have (up to three), so they are never shown rounded.
 enum ProfileValueFormat {
     static func text(_ value: Double, decimals: Int) -> String {
         Localizer.formatToLocalizedString(value, maxFractionDigits: max(decimals, 3), minFractionDigits: decimals)
     }
 
-    static func text(_ value: Double, kind: ProfileScheduleKind, limits: ProfileEditLimits?) -> String {
-        text(value, decimals: limits.map { kind.decimals(in: $0) } ?? defaultDecimals(kind))
+    static func text(_ value: Double, kind: ProfileScheduleKind, limits: ProfileEditLimits?, glucoseUnits: String) -> String {
+        if kind.isGlucose, TherapyProfileValues.normalizedUnits(glucoseUnits) == TherapyProfileValues.mmol {
+            return Localizer.formatToLocalizedString(value, maxFractionDigits: 1, minFractionDigits: 1)
+        }
+        return text(value, decimals: limits.map { kind.decimals(in: $0) } ?? defaultDecimals(kind))
     }
 
     static func defaultDecimals(_ kind: ProfileScheduleKind) -> Int {
         kind == .basal ? 2 : 0
     }
 
-    static func segmentText(_ segment: EditableSegment, kind: ProfileScheduleKind, limits: ProfileEditLimits?, singleTarget: Bool = false) -> String {
+    static func segmentText(_ segment: EditableSegment, kind: ProfileScheduleKind, limits: ProfileEditLimits?, glucoseUnits: String, singleTarget: Bool = false) -> String {
         if kind.isRange, !singleTarget {
-            return "\(text(segment.value, kind: kind, limits: limits)) – \(text(segment.high, kind: kind, limits: limits))"
+            return "\(text(segment.value, kind: kind, limits: limits, glucoseUnits: glucoseUnits)) – \(text(segment.high, kind: kind, limits: limits, glucoseUnits: glucoseUnits))"
         }
-        return text(segment.value, kind: kind, limits: limits)
+        return text(segment.value, kind: kind, limits: limits, glucoseUnits: glucoseUnits)
     }
 
     /// Schedule start times are offsets from midnight in the profile's time zone.
@@ -113,7 +116,7 @@ struct ProfileValuesEditor: View {
                     Text(ProfileValueFormat.timeText(segment.seconds))
                         .foregroundColor(.primary)
                 } value: {
-                    Text("\(ProfileValueFormat.segmentText(segment, kind: kind, limits: limits, singleTarget: singleTarget)) \(unitText)")
+                    Text("\(ProfileValueFormat.segmentText(segment, kind: kind, limits: limits, glucoseUnits: units, singleTarget: singleTarget)) \(unitText)")
                         .foregroundColor(color(for: status))
                 }
                 switch status {
@@ -122,7 +125,7 @@ struct ProfileValuesEditor: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 case .outsideRecommended:
-                    Text("Unusual value. Double-check it with the care team's plan.")
+                    Text("Unusual value. Double-check it.")
                         .font(.caption)
                         .foregroundColor(.orange)
                 case .ok:
@@ -159,7 +162,7 @@ struct ProfileValuesEditor: View {
     private func valuePicker(label: String, selection: Binding<Double>, options: [Double], limits: ProfileEditLimits) -> some View {
         Picker(label, selection: selection) {
             ForEach(options, id: \.self) { value in
-                Text(ProfileValueFormat.text(value, kind: kind, limits: limits))
+                Text(ProfileValueFormat.text(value, kind: kind, limits: limits, glucoseUnits: units))
                     .foregroundColor(color(for: limits.status(of: value, in: kind)))
                     .tag(value)
             }
