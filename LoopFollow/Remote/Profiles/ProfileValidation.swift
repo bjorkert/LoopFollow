@@ -23,6 +23,9 @@ enum ProfileScheduleKind: String, CaseIterable, Identifiable {
 
     var isRange: Bool { self == .correctionRange }
 
+    /// Correction ranges and insulin sensitivities are in the profile's glucose units.
+    var isGlucose: Bool { self == .correctionRange || self == .sensitivity }
+
     func unitText(glucoseUnits: String) -> String {
         switch self {
         case .correctionRange: return glucoseUnits
