@@ -125,7 +125,7 @@ struct ProfileValuesEditor: View {
                         .font(.caption)
                         .foregroundColor(.red)
                 case .outsideRecommended:
-                    Text("Unusual value. Double-check it with the care team's plan.")
+                    Text("Unusual value. Double-check it.")
                         .font(.caption)
                         .foregroundColor(.orange)
                 case .ok:

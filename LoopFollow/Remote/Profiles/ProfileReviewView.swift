@@ -145,7 +145,7 @@ struct ProfileReviewView: View {
             }
 
             Section {
-                ProfileCareTeamNote()
+                ProfileDosingNote()
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }

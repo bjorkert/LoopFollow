@@ -42,7 +42,7 @@ struct TherapyProfilesView: View {
     var body: some View {
         List {
             Section {
-                ProfileCareTeamNote()
+                ProfileDosingNote()
                     .font(.footnote)
                     .foregroundColor(.secondary)
             }

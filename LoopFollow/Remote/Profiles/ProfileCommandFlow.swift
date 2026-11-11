@@ -139,9 +139,9 @@ extension View {
 }
 
 /// The note shown where profiles are introduced and before a change is sent.
-struct ProfileCareTeamNote: View {
+struct ProfileDosingNote: View {
     var body: some View {
-        Text("Profiles hold the settings used to dose insulin. Agree on profiles and any change to them with the care team. LoopFollow does not give medical advice.")
+        Text("Profiles hold the settings used to dose insulin.")
     }
 }
 
