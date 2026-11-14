@@ -27,6 +27,10 @@ enum WatchStateBuilder {
             .filter { $0.date >= cutoff }
             .map { WatchReading(t: $0.date, v: $0.value) }
 
+        let unreliable = (vc?.unreliableGraphData ?? [])
+            .filter { $0.date >= cutoff && $0.sgv > 0 }
+            .map { WatchReading(t: $0.date, v: Double($0.sgv)) }
+
         let overrides = (vc?.overrideGraphData ?? [])
             .filter { $0.endDate >= cutoff }
             .map { WatchOverride(start: $0.date, end: $0.endDate, name: $0.reason.isEmpty ? "Override" : $0.reason, percent: overridePercent($0)) }
@@ -68,7 +72,8 @@ enum WatchStateBuilder {
             device: Storage.shared.device.value,
             alarm: currentAlarm(),
             snoozeAllUntil: Storage.shared.alarmConfiguration.value.snoozeUntil.flatMap { $0 > now ? $0 : nil },
-            remote: remoteConfig()
+            remote: remoteConfig(),
+            unreliable: unreliable
         )
     }
 
