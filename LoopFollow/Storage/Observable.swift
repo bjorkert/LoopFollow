@@ -63,6 +63,9 @@ class Observable {
 
     var lastSentTOTP = ObservableValue<String?>(default: nil)
 
+    /// Greatest Nightscout `_id` in the latest treatments download; nil until one has loaded.
+    var treatmentsKnownThroughID = ObservableValue<String?>(default: nil)
+
     var loopFollowDeviceToken = ObservableValue<String>(default: "")
 
     /// Saved profiles from the latest Loop or Trio profile upload; nil until one is loaded.
